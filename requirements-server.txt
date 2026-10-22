@@ -1,0 +1,8 @@
+# ===== 服务端最小依赖（部署用）=====
+# API 运行时只用到以下组件；bge-m3 / torch / FlagEmbedding 仅本地做向量索引时需要，
+# 服务端不必安装（可省约 2.5GB）。
+fastapi>=0.115
+uvicorn[standard]>=0.30
+networkx>=3.3
+openai>=1.40.0
+python-dotenv>=1.0.1

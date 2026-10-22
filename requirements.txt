@@ -1,0 +1,20 @@
+# ============ 后端依赖 ============
+# Web 框架
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# 图存储与检索
+networkx>=3.3
+
+# 向量召回：bge-m3（本地 CPU 加载，会自动安装 torch）
+FlagEmbedding>=1.2.10
+numpy==1.26.4
+
+# 文本生成：Qwen 在线接口（OpenAI 兼容协议）
+openai>=1.40.0
+
+# 配置与工具
+python-dotenv>=1.0.1
+
+# ============ 测试 ============
+pytest>=8.3
