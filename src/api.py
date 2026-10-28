@@ -8,6 +8,7 @@ import time
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
 
 from . import chat_service
 from .auth_api import router as auth_router
