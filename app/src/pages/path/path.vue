@@ -2,7 +2,10 @@
   <view class="page">
     <!-- 顶部：知识点 + 出处 -->
     <view class="header">
-      <text class="kp">{{ body }}</text>
+      <view class="header-row">
+        <text class="kp">{{ body }}</text>
+        <text class="auth-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录' }}</text>
+      </view>
       <text class="source">📚 {{ store.source || '人教版五年级下册' }}</text>
     </view>
 
@@ -48,6 +51,10 @@ const lp = computed(() => store.learningPath || { prerequisites: [], body: '', c
 const body = computed(() => lp.value.body || store.knowledgePoint)
 const prerequisites = computed(() => lp.value.prerequisites || [])
 const consolidation = computed(() => lp.value.consolidation || [])
+
+function goAuth() {
+  uni.navigateTo({ url: '/pages/auth/auth' })
+}
 </script>
 
 <style>
@@ -63,11 +70,22 @@ const consolidation = computed(() => lp.value.consolidation || [])
   padding: 32rpx 30rpx;
   border-bottom: 1rpx solid #eee;
 }
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
 .kp {
   font-size: 36rpx;
   font-weight: 700;
   color: #2b6cb0;
   display: block;
+}
+.auth-link {
+  margin-left: 20rpx;
+  font-size: 24rpx;
+  color: #2b6cb0;
+  flex-shrink: 0;
 }
 .source {
   margin-top: 8rpx;

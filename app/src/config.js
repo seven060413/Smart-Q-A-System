@@ -3,4 +3,5 @@
 // 1) 本地 H5 调试：http://127.0.0.1:18080
 // 2) 本机局域网调试：http://<电脑 WLAN IPv4>:18080（热点重连后会变）
 // 3) 云服务器：http://114.55.116.162:18080（当前使用）
-export const BASE_URL = 'http://114.55.116.162:18080'
+//export const BASE_URL = 'http://114.55.116.162:18080'
+ export const BASE_URL = 'http://127.0.0.1:18080'

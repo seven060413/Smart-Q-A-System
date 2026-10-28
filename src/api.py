@@ -1,9 +1,11 @@
-"""FastAPI 服务：暴露 POST /api/ask 问答接口。"""
+"""FastAPI 服务：问答接口 + 学生认证接口。"""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .auth_api import router as auth_router
+from .errors import install_error_handlers
 from .generator import QwenGenerator
 from .graph import load_full_graph
 from .loader import load_nodes
@@ -12,7 +14,12 @@ from .subgraph import OUT_PATH
 
 app = FastAPI(title="中小学教材知识图谱智能问答系统")
 
-# CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域
+# 统一错误结构 + X-Request-ID；认证路由在下面注册。
+install_error_handlers(app)
+app.include_router(auth_router)
+
+# CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域。
+# 阶段 2.5（HTTPS/反向代理）会把这里收紧为白名单；当前保持现状以兼容旧前端。
 
 app.add_middleware(
     CORSMiddleware,

@@ -15,6 +15,14 @@
 				"navigationBarBackgroundColor": "#2b6cb0",
 				"navigationBarTextStyle": "white"
 			}
+		},
+		{
+			"path": "pages/auth/auth",
+			"style": {
+				"navigationBarTitleText": "登录 / 注册",
+				"navigationBarBackgroundColor": "#2b6cb0",
+				"navigationBarTextStyle": "white"
+			}
 		}
 	],
 	"globalStyle": {

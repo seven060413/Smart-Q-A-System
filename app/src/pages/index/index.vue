@@ -1,5 +1,11 @@
 <template>
   <view class="page">
+    <!-- 登录状态栏：游客也能问答，登录用于保存账号状态 -->
+    <view class="topbar">
+      <text class="topbar-state">{{ authStateText }}</text>
+      <text class="topbar-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录 / 注册' }}</text>
+    </view>
+
     <!-- 聊天消息区 -->
     <scroll-view class="chat" scroll-y :scroll-into-view="scrollTo" scroll-with-animation>
       <!-- 欢迎提示 -->
@@ -99,7 +105,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { askQuestion } from '../../api.js'
 import { store } from '../../store.js'
 
@@ -107,6 +113,18 @@ const question = ref('')
 const loading = ref(false)
 const messages = reactive([])
 const scrollTo = ref('')
+
+const authStateText = computed(() => {
+  if (!store.auth.ready) return '正在检查登录状态…'
+  if (store.auth.user) {
+    return '已登录：' + (store.auth.user.display_name || store.auth.user.username)
+  }
+  return '游客模式'
+})
+
+function goAuth() {
+  uni.navigateTo({ url: '/pages/auth/auth' })
+}
 
 function scrollBottom() {
   // 先清空再赋值，触发 scroll-into-view 重新定位
@@ -173,6 +191,24 @@ function goPath(msg) {
   display: flex;
   flex-direction: column;
   background: #f5f6f8;
+}
+
+/* 登录状态栏 */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14rpx 24rpx;
+  background: #fff;
+  border-bottom: 1rpx solid #eee;
+}
+.topbar-state {
+  font-size: 24rpx;
+  color: #888;
+}
+.topbar-link {
+  font-size: 24rpx;
+  color: #2b6cb0;
 }
 
 .chat {
