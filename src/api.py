@@ -13,6 +13,7 @@ from .subgraph import OUT_PATH
 app = FastAPI(title="中小学教材知识图谱智能问答系统")
 
 # CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
