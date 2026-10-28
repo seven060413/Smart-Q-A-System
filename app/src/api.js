@@ -78,12 +78,72 @@ function request(path, { method = 'GET', data = null, auth = false, timeout = 15
   })
 }
 
-// 问答：保持原有调用方式，游客和登录用户都可使用；聊天历史在阶段 5 接入。
-export function askQuestion(question) {
+function queryString(params) {
+  const parts = Object.entries(params)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+  return parts.length ? `?${parts.join('&')}` : ''
+}
+
+/**
+ * 问答：
+ * - 游客不传 auth/conversationId，不落库；
+ * - 登录用户传 auth=true，后端按令牌归属保存；
+ * - clientRequestId 用于网络重试去重。
+ */
+export function askQuestion(
+  question,
+  { conversationId = null, clientRequestId = null, auth = false } = {}
+) {
+  const data = { question }
+  if (conversationId) data.conversation_id = conversationId
+  if (clientRequestId) data.client_request_id = clientRequestId
   return request('/api/ask', {
     method: 'POST',
-    data: { question },
+    data,
+    auth,
     timeout: 60000,
+  })
+}
+
+export function createConversation(payload = {}) {
+  return request('/api/conversations', {
+    method: 'POST',
+    data: payload,
+    auth: true,
+    timeout: 15000,
+  })
+}
+
+export function listConversations({ limit = 20, cursor = null } = {}) {
+  return request(`/api/conversations${queryString({ limit, cursor })}`, {
+    auth: true,
+    timeout: 15000,
+  })
+}
+
+export function getConversation(conversationId) {
+  return request(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+    auth: true,
+    timeout: 15000,
+  })
+}
+
+export function listMessages(conversationId, { limit = 50, cursor = null } = {}) {
+  return request(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages${queryString({
+      limit,
+      cursor,
+    })}`,
+    { auth: true, timeout: 15000 }
+  )
+}
+
+export function deleteConversation(conversationId) {
+  return request(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'DELETE',
+    auth: true,
+    timeout: 15000,
   })
 }
 

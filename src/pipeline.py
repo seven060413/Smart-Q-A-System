@@ -84,4 +84,22 @@ def run_qa(question, graph, kp_nodes) -> dict:
         "source": citation,
         "refused": False,
         "prompt": build_prompt(question, node, diag, path, citation, graph),
+        # 内部结构化元数据：供聊天持久化保存知识点 id；API 返回前会移除。
+        "_meta": {
+            "body": {"id": node.id, "name": node.name},
+            "required": [
+                {"id": i, "name": graph.nodes[i]["name"]} for i in diag["required"]
+            ],
+            "suggested": [
+                {"id": i, "name": graph.nodes[i]["name"]} for i in diag["suggested"]
+            ],
+            "prerequisites": [
+                {"id": i, "name": graph.nodes[i]["name"]}
+                for i in path["prerequisites"]
+            ],
+            "consolidation": [
+                {"id": i, "name": graph.nodes[i]["name"]}
+                for i in path["consolidation"]
+            ],
+        },
     }

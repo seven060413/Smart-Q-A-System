@@ -23,6 +23,14 @@
 				"navigationBarBackgroundColor": "#2b6cb0",
 				"navigationBarTextStyle": "white"
 			}
+		},
+		{
+			"path": "pages/history/history",
+			"style": {
+				"navigationBarTitleText": "历史会话",
+				"navigationBarBackgroundColor": "#2b6cb0",
+				"navigationBarTextStyle": "white"
+			}
 		}
 	],
 	"globalStyle": {

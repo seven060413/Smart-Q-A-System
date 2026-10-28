@@ -3,13 +3,22 @@
     <!-- 登录状态栏：游客也能问答，登录用于保存账号状态 -->
     <view class="topbar">
       <text class="topbar-state">{{ authStateText }}</text>
-      <text class="topbar-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录 / 注册' }}</text>
+      <view class="topbar-actions">
+        <text v-if="store.auth.user" class="topbar-link" @click="newConversation">新对话</text>
+        <text v-if="store.auth.user" class="topbar-link" @click="goHistory">历史</text>
+        <text class="topbar-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录 / 注册' }}</text>
+      </view>
     </view>
 
     <!-- 聊天消息区 -->
     <scroll-view class="chat" scroll-y :scroll-into-view="scrollTo" scroll-with-animation>
+      <!-- 历史消息分页 -->
+      <view v-if="hasEarlier" class="load-earlier" @click="loadEarlier">
+        {{ loadingEarlier ? '加载中…' : '加载更早的消息' }}
+      </view>
+
       <!-- 欢迎提示 -->
-      <view v-if="messages.length === 0 && !loading" class="welcome">
+      <view v-if="messages.length === 0 && !loading && !historyLoading" class="welcome">
         <text class="welcome-emoji">📚</text>
         <text class="welcome-text">我是小学数学助教，问我教材里的知识吧～\n例如：为什么异分母分数相加要先通分</text>
       </view>
@@ -24,8 +33,15 @@
         <!-- AI 回答气泡（左） -->
         <view v-else class="msg msg-ai">
           <view class="bubble bubble-ai">
+            <!-- 生成失败卡 -->
+            <view v-if="msg.failed" class="failed-card">
+              <view class="failed-title">⚠️ 回答生成失败</view>
+              <view class="failed-text">{{ msg.error_message || '请稍后重新提问' }}</view>
+              <button v-if="msg.retryQuestion" class="retry-btn" @click="retry(msg)">重新提问</button>
+            </view>
+
             <!-- 拒答卡 -->
-            <view v-if="msg.refused" class="refuse-card">
+            <view v-else-if="msg.refused" class="refuse-card">
               <view class="refuse-title">⚠️ {{ msg.answer }}</view>
               <view v-if="msg.knowledge_point" class="refuse-closest">最接近知识点：{{ msg.knowledge_point }}</view>
             </view>
@@ -83,6 +99,11 @@
         </view>
       </view>
 
+      <!-- 加载历史会话 -->
+      <view v-if="historyLoading" class="msg msg-ai">
+        <view class="bubble bubble-ai typing">正在加载历史会话…</view>
+      </view>
+
       <!-- 思考中 -->
       <view v-if="loading" class="msg msg-ai">
         <view class="bubble bubble-ai typing">思考中…</view>
@@ -105,14 +126,19 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { askQuestion } from '../../api.js'
+import { computed, reactive, ref, watch } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { askQuestion, listMessages } from '../../api.js'
 import { store } from '../../store.js'
 
 const question = ref('')
 const loading = ref(false)
+const historyLoading = ref(false)
+const loadingEarlier = ref(false)
 const messages = reactive([])
 const scrollTo = ref('')
+const messagesCursor = ref('')
+const hasEarlier = ref(false)
 
 const authStateText = computed(() => {
   if (!store.auth.ready) return '正在检查登录状态…'
@@ -125,6 +151,137 @@ const authStateText = computed(() => {
 function goAuth() {
   uni.navigateTo({ url: '/pages/auth/auth' })
 }
+
+function goHistory() {
+  uni.navigateTo({ url: '/pages/history/history' })
+}
+
+function newConversation() {
+  if (loading.value) return
+  messages.splice(0, messages.length)
+  question.value = ''
+  store.currentConversationId = ''
+  messagesCursor.value = ''
+  hasEarlier.value = false
+  scrollTo.value = ''
+  uni.showToast({ title: '已开始新对话', icon: 'none' })
+}
+
+function newRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+function toUiMessages(items) {
+  const out = []
+  let lastUser = ''
+  for (const m of items) {
+    if (m.role === 'user') {
+      lastUser = m.content || ''
+      out.push({ role: 'user', text: lastUser })
+    } else if (m.role === 'assistant') {
+      out.push({
+        role: 'ai',
+        answer: m.content || '',
+        knowledge_point: m.knowledge_point || '',
+        prerequisite_gaps: m.prerequisite_gaps || [],
+        learning_path: m.learning_path || { prerequisites: [], body: '', consolidation: [] },
+        source: m.source || '',
+        refused: !!m.refused,
+        failed: m.status === 'failed',
+        error_message: m.error_message || '',
+        retryQuestion: lastUser,
+        open: { pre: false, body: true, cons: false },
+      })
+    }
+  }
+  return out
+}
+
+async function loadConversation(conversationId) {
+  if (!store.auth.user) {
+    goAuth()
+    return
+  }
+  historyLoading.value = true
+  try {
+    const page = await listMessages(conversationId, { limit: 50 })
+    messages.splice(0, messages.length, ...toUiMessages(page.items))
+    store.currentConversationId = conversationId
+    messagesCursor.value = page.next_cursor || ''
+    hasEarlier.value = !!page.has_more
+
+    const lastAi = [...messages].reverse().find((m) => m.role === 'ai' && m.learning_path)
+    if (lastAi) {
+      store.learningPath = lastAi.learning_path
+      store.knowledgePoint = lastAi.knowledge_point
+      store.source = lastAi.source
+    }
+    scrollBottom()
+  } catch (e) {
+    if (e && e.status === 401) {
+      uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+      goAuth()
+    } else if (e && e.status === 404) {
+      uni.showToast({ title: '会话不存在', icon: 'none' })
+      newConversation()
+    } else {
+      uni.showToast({ title: (e && e.message) || '加载历史失败', icon: 'none' })
+    }
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function loadEarlier() {
+  if (!hasEarlier.value || loadingEarlier.value || !store.currentConversationId) return
+  loadingEarlier.value = true
+  try {
+    const page = await listMessages(store.currentConversationId, {
+      limit: 50,
+      cursor: messagesCursor.value || null,
+    })
+    messages.unshift(...toUiMessages(page.items))
+    messagesCursor.value = page.next_cursor || ''
+    hasEarlier.value = !!page.has_more
+  } catch (e) {
+    uni.showToast({ title: (e && e.message) || '加载更早消息失败', icon: 'none' })
+  } finally {
+    loadingEarlier.value = false
+  }
+}
+
+function retry(msg) {
+  if (loading.value) return
+  const q = (msg.retryQuestion || '').trim()
+  if (!q) return
+  question.value = q
+  send()
+}
+
+onLoad((options) => {
+  if (options && options.conversation_id) {
+    const conversationId = options.conversation_id
+    if (store.auth.ready) {
+      loadConversation(conversationId)
+    } else {
+      // 冷启动直接打开某个历史会话时，等 initAuth 恢复登录态后再加载。
+      const stop = watch(
+        () => store.auth.ready,
+        (ready) => {
+          if (ready) {
+            stop()
+            loadConversation(conversationId)
+          }
+        }
+      )
+    }
+  } else {
+    store.currentConversationId = ''
+  }
+})
 
 function scrollBottom() {
   // 先清空再赋值，触发 scroll-into-view 重新定位
@@ -142,8 +299,18 @@ function send() {
   loading.value = true
   scrollBottom()
 
-  askQuestion(q)
+  const loggedIn = !!(store.auth.user && store.auth.token)
+  const requestId = newRequestId()
+
+  askQuestion(q, {
+    conversationId: loggedIn ? store.currentConversationId || null : null,
+    clientRequestId: loggedIn ? requestId : null,
+    auth: loggedIn,
+  })
     .then((data) => {
+      if (data.conversation_id) {
+        store.currentConversationId = data.conversation_id
+      }
       messages.push({
         role: 'ai',
         answer: data.answer || '',
@@ -152,18 +319,31 @@ function send() {
         learning_path: data.learning_path || { prerequisites: [], body: '', consolidation: [] },
         source: data.source || '',
         refused: !!data.refused,
+        failed: false,
+        error_message: '',
+        retryQuestion: q,
         open: { pre: false, body: true, cons: false },
       })
     })
-    .catch(() => {
+    .catch((e) => {
+      if (e && e.status === 404) {
+        store.currentConversationId = ''
+      }
+      const errMsg =
+        e && e.status === 401
+          ? '登录已过期，请重新登录后重试'
+          : (e && e.message) || '网络请求失败，请检查后端是否启动、地址是否配置正确'
       messages.push({
         role: 'ai',
-        refused: true,
-        answer: '网络请求失败，请检查后端是否启动、地址是否配置正确',
+        answer: '',
+        refused: false,
+        failed: true,
+        error_message: errMsg,
         knowledge_point: '',
         prerequisite_gaps: [],
         learning_path: { prerequisites: [], body: '', consolidation: [] },
         source: '',
+        retryQuestion: q,
         open: { pre: false, body: true, cons: false },
       })
     })
@@ -209,6 +389,18 @@ function goPath(msg) {
 .topbar-link {
   font-size: 24rpx;
   color: #2b6cb0;
+}
+.topbar-actions {
+  display: flex;
+  gap: 24rpx;
+  align-items: center;
+}
+
+.load-earlier {
+  text-align: center;
+  font-size: 24rpx;
+  color: #2b6cb0;
+  padding: 12rpx 0 24rpx;
 }
 
 .chat {
@@ -363,6 +555,39 @@ function goPath(msg) {
 .refuse-closest {
   font-size: 26rpx;
   color: #9b2c2c;
+}
+
+/* 生成失败卡 */
+.failed-card {
+  background: #fffaf0;
+  border: 1rpx solid #fbd38d;
+  border-radius: 16rpx;
+  padding: 24rpx;
+}
+.failed-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #c05621;
+  margin-bottom: 12rpx;
+}
+.failed-text {
+  font-size: 26rpx;
+  color: #975a16;
+  line-height: 1.6;
+}
+.retry-btn {
+  margin-top: 18rpx;
+  display: inline-block;
+  background: #fff;
+  color: #c05621;
+  font-size: 24rpx;
+  border: 1rpx solid #fbd38d;
+  border-radius: 999rpx;
+  padding: 0 24rpx;
+  line-height: 60rpx;
+}
+.retry-btn::after {
+  border: none;
 }
 
 /* 学习路径按钮 */

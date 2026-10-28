@@ -20,6 +20,7 @@
       <view v-if="error" class="error">{{ error }}</view>
 
       <button class="primary" @click="goBack">返回问答</button>
+      <button class="ghost history-btn" @click="goHistory">历史会话</button>
       <button class="ghost" :disabled="loading" @click="doLogout">
         {{ loading ? '退出中…' : '退出登录' }}
       </button>
@@ -225,6 +226,10 @@ function goBack() {
   }
 }
 
+function goHistory() {
+  uni.navigateTo({ url: '/pages/history/history' })
+}
+
 function formatTime(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -311,6 +316,10 @@ function formatTime(iso) {
 .ghost[disabled] {
   color: #bbb;
   border-color: #eee;
+}
+.ghost.history-btn {
+  color: #2b6cb0;
+  border-color: #bcd3f0;
 }
 
 .error {
