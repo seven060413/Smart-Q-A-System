@@ -18,8 +18,9 @@ from .errors import ApiError, install_error_handlers
 from .generator import QwenGenerator
 from .graph import load_full_graph
 from .loader import load_nodes
-from .pipeline import run_qa
-from .subgraph import OUT_PATH
+from .pipeline import run_qa, split_generated_answer
+from .settings import qa_match_scope
+from .subgraph import OUT_PATH, RAW_PATH
 
 logger = logging.getLogger("ikgr.chat")
 
@@ -42,7 +43,14 @@ app.add_middleware(
 
 # 启动时加载图谱、知识点与生成器
 graph = load_full_graph()
-kp_nodes = load_nodes(OUT_PATH)
+match_scope = qa_match_scope()
+# full：全量数学图谱；book_5b：仅五年级下册子图（旧行为）
+kp_nodes = load_nodes(OUT_PATH if match_scope == "book_5b" else RAW_PATH)
+logger.info(
+    "qa match scope=%s candidates=%d",
+    match_scope,
+    sum(1 for n in kp_nodes if n.label in ("Concept", "Skill")),
+)
 generator = QwenGenerator()
 # 语音转写适配层：只读环境变量，不额外初始化大模型
 transcriber = speech.SpeechTranscriber()
@@ -71,11 +79,12 @@ class AskRequest(BaseModel):
 
 
 def _fill_answer(result: dict) -> None:
-    """调用生成器填充 answer；拒答问题不发请求。"""
+    """调用生成器填充 answer / exercises；拒答问题不发请求。"""
     if result["refused"]:
+        result.setdefault("exercises", [])
         return
     try:
-        answer = generator.generate(result["prompt"])
+        raw = generator.generate(result["prompt"])
     except Exception as exc:
         logger.exception("answer generation failed type=%s", type(exc).__name__)
         raise ApiError(
@@ -83,9 +92,26 @@ def _fill_answer(result: dict) -> None:
             "UPSTREAM_ERROR",
             "回答生成失败，请稍后重试",
         ) from None
-    if not isinstance(answer, str) or not answer.strip():
+    if not isinstance(raw, str) or not raw.strip():
         raise ApiError(502, "UPSTREAM_ERROR", "回答生成失败，请稍后重试")
+
+    answer, exercises = split_generated_answer(raw)
     result["answer"] = answer
+    result["exercises"] = exercises
+    # 持久化只写 learning_path_json，把生成结果一并放进去，历史消息可直接还原。
+    if result.get("learning_path") is not None:
+        result["learning_path"]["exercises"] = exercises
+
+
+def _body_graph_version_id(versions: dict) -> str | None:
+    """记录实际参与匹配的图谱版本。
+
+    full 模式用 subject_full 版本；book_5b 模式沿用五下 book 版本。
+    没有 full 版本时回退到 book 版本。
+    """
+    if qa_match_scope() == "book_5b":
+        return versions.get("book_version_id")
+    return versions.get("full_version_id") or versions.get("book_version_id")
 
 
 def _fail_assistant(
@@ -110,7 +136,7 @@ def _fail_assistant(
         source=result.get("source"),
         prerequisite_gaps=result.get("prerequisite_gaps"),
         learning_path=result.get("learning_path"),
-        graph_version_id=versions.get("book_version_id"),
+        graph_version_id=_body_graph_version_id(versions),
         context_graph_version_id=versions.get("full_version_id"),
         reply_to_message_id=user_message_id,
         meta=None,
@@ -251,7 +277,7 @@ def ask(
         source=result.get("source"),
         prerequisite_gaps=result.get("prerequisite_gaps"),
         learning_path=result.get("learning_path"),
-        graph_version_id=versions.get("book_version_id"),
+        graph_version_id=_body_graph_version_id(versions),
         context_graph_version_id=versions.get("full_version_id"),
         reply_to_message_id=user_msg["id"],
         meta=meta,

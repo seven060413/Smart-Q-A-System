@@ -97,6 +97,7 @@ def conversation_to_dict(row) -> dict:
 
 
 def message_to_dict(row) -> dict:
+    learning_path = _loads(row["learning_path_json"], None)
     return {
         "id": row["id"],
         "role": row["role"],
@@ -106,7 +107,8 @@ def message_to_dict(row) -> dict:
         "knowledge_point": row["knowledge_point"],
         "source": row["source"],
         "prerequisite_gaps": _loads(row["prerequisite_gaps_json"], []),
-        "learning_path": _loads(row["learning_path_json"], None),
+        "learning_path": learning_path,
+        "exercises": (learning_path or {}).get("exercises", []),
         "reply_to_message_id": row["reply_to_message_id"],
         "error_code": row["error_code"],
         "error_message": row["error_message"],
@@ -514,11 +516,13 @@ def stored_turn_response(user_row, assistant_row) -> dict:
                 "assistant_message_id": assistant_row["id"],
             },
         )
+    learning_path = _loads(assistant_row["learning_path_json"], None)
     return {
         "answer": assistant_row["content"],
+        "exercises": (learning_path or {}).get("exercises", []),
         "knowledge_point": assistant_row["knowledge_point"],
         "prerequisite_gaps": _loads(assistant_row["prerequisite_gaps_json"], []),
-        "learning_path": _loads(assistant_row["learning_path_json"], None),
+        "learning_path": learning_path,
         "source": assistant_row["source"],
         "refused": bool(assistant_row["refused"]),
         "persisted": True,

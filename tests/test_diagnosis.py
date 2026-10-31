@@ -33,7 +33,33 @@ def test_diagnose必需与建议():
 
 def test_format_citation():
     g = build_digraph(
-        [Node("A", "Concept", "甲"), Node("ch1", "Chapter", "分数的加法和减法")],
-        [Edge("A", "ch1", "appears_in")],
+        [
+            Node("A", "Concept", "甲"),
+            Node("ch1", "Chapter", "分数的加法和减法"),
+            Node(
+                "book1",
+                "Book",
+                "五年级下册",
+                {"publisher": "人教版", "grade": "五年级下册"},
+            ),
+        ],
+        [
+            Edge("A", "ch1", "appears_in"),
+            Edge("ch1", "book1", "is_part_of"),
+        ],
     )
     assert format_citation(g, "A") == "人教版五年级下册·分数的加法和减法"
+
+
+def test_format_citation无教材归属时回退():
+    g = build_digraph(
+        [
+            Node("A", "Concept", "甲"),
+            Node("B", "Concept", "乙"),
+            Node("ch1", "Chapter", "数与代数"),
+        ],
+        [Edge("A", "ch1", "appears_in")],
+    )
+    # 章节找不到所属 Book 时仍保留章节名；没有 appears_in 归属时回退为「知识图谱」
+    assert format_citation(g, "A") == "数与代数"
+    assert format_citation(g, "B") == "知识图谱"

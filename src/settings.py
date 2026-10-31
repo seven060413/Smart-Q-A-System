@@ -11,6 +11,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .refusal import LINK_THRESHOLD
+
 ROOT = Path(__file__).resolve().parents[1]
 # 复用项目根目录的 .env；override=False，不覆盖已有环境变量。
 load_dotenv(ROOT / ".env")
@@ -62,3 +64,26 @@ def login_rate_limit() -> tuple[int, int]:
 def scrypt_n() -> int:
     """scrypt 的 CPU/内存成本参数；默认 2^15，测试可临时调低。"""
     return _int_env("AUTH_SCRYPT_N", 32768, 1024, 1048576)
+
+
+def qa_match_scope() -> str:
+    """问答知识点匹配范围。
+
+    - full（默认）：全量数学图谱，覆盖小学到高中；
+    - book_5b：仅五年级下册子图（旧行为，便于回滚/对比）。
+    非法值回退到 full。
+    """
+    raw = os.getenv("QA_MATCH_SCOPE", "full").strip().lower()
+    return raw if raw in {"full", "book_5b"} else "full"
+
+
+def qa_link_threshold() -> float:
+    """实体链接拒答阈值，默认 0.35；可用 QA_LINK_THRESHOLD 覆盖。"""
+    raw = os.getenv("QA_LINK_THRESHOLD")
+    if raw is None or raw.strip() == "":
+        return LINK_THRESHOLD
+    try:
+        value = float(raw)
+    except ValueError:
+        return LINK_THRESHOLD
+    return max(0.0, min(1.0, value))

@@ -20,7 +20,7 @@
       <!-- 欢迎提示 -->
       <view v-if="messages.length === 0 && !loading && !historyLoading" class="welcome">
         <text class="welcome-emoji">📚</text>
-        <text class="welcome-text">我是小学数学助教，问我教材里的知识吧～\n例如：为什么异分母分数相加要先通分</text>
+        <text class="welcome-text">我是中小学数学助教，问我教材里的知识吧～\n例如：为什么异分母分数相加要先通分</text>
       </view>
 
       <!-- 消息列表 -->
@@ -86,10 +86,19 @@
                   <text class="arrow">{{ msg.open.cons ? '▾' : '▸' }}</text>
                 </view>
                 <view v-if="msg.open.cons" class="section-body">
-                  <view v-for="(c, j) in msg.learning_path.consolidation" :key="j" class="gap">
-                    <text class="gap-name">{{ c }}</text>
-                  </view>
-                  <text v-if="msg.learning_path.consolidation.length === 0" class="empty">无</text>
+                  <template v-if="msg.learning_path.exercises.length">
+                    <view v-for="(ex, j) in msg.learning_path.exercises" :key="j" class="exercise">
+                      <text class="exercise-no">第 {{ j + 1 }} 题</text>
+                      <text class="exercise-text">{{ ex }}</text>
+                    </view>
+                  </template>
+                  <template v-else-if="msg.learning_path.consolidation.length">
+                    <text class="exercise-hint">图谱后续知识点（供参考）</text>
+                    <view v-for="(c, j) in msg.learning_path.consolidation" :key="j" class="gap">
+                      <text class="gap-name">{{ c }}</text>
+                    </view>
+                  </template>
+                  <text v-else class="empty">暂无巩固练习</text>
                 </view>
               </view>
 
@@ -875,6 +884,20 @@ function newRequestId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
 
+function normalizeLearningPath(payload) {
+  const lp = (payload && payload.learning_path) || payload || {}
+  let exercises = lp.exercises
+  if (!Array.isArray(exercises)) {
+    exercises = Array.isArray(payload && payload.exercises) ? payload.exercises : []
+  }
+  return {
+    prerequisites: Array.isArray(lp.prerequisites) ? lp.prerequisites : [],
+    body: lp.body || '',
+    consolidation: Array.isArray(lp.consolidation) ? lp.consolidation : [],
+    exercises,
+  }
+}
+
 function toUiMessages(items) {
   const out = []
   let lastUser = ''
@@ -888,7 +911,7 @@ function toUiMessages(items) {
         answer: m.content || '',
         knowledge_point: m.knowledge_point || '',
         prerequisite_gaps: m.prerequisite_gaps || [],
-        learning_path: m.learning_path || { prerequisites: [], body: '', consolidation: [] },
+        learning_path: normalizeLearningPath(m),
         source: m.source || '',
         refused: !!m.refused,
         failed: m.status === 'failed',
@@ -1039,7 +1062,7 @@ function send() {
         answer: data.answer || '',
         knowledge_point: data.knowledge_point || '',
         prerequisite_gaps: data.prerequisite_gaps || [],
-        learning_path: data.learning_path || { prerequisites: [], body: '', consolidation: [] },
+        learning_path: normalizeLearningPath(data),
         source: data.source || '',
         refused: !!data.refused,
         failed: false,
@@ -1064,7 +1087,7 @@ function send() {
         error_message: errMsg,
         knowledge_point: '',
         prerequisite_gaps: [],
-        learning_path: { prerequisites: [], body: '', consolidation: [] },
+        learning_path: normalizeLearningPath(null),
         source: '',
         retryQuestion: q,
         open: { pre: false, body: true, cons: false },
@@ -1267,6 +1290,34 @@ function goPath(msg) {
 .empty {
   font-size: 26rpx;
   color: #bbb;
+}
+.exercise {
+  padding: 12rpx 0;
+  border-bottom: 1rpx dashed #eee;
+}
+.exercise:last-child {
+  border-bottom: none;
+}
+.exercise-no {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #2b6cb0;
+  margin-bottom: 6rpx;
+}
+.exercise-text {
+  display: block;
+  font-size: 28rpx;
+  color: #333;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.exercise-hint {
+  display: block;
+  font-size: 22rpx;
+  color: #999;
+  margin-bottom: 8rpx;
 }
 
 /* 拒答卡 */

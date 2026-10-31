@@ -1,9 +1,13 @@
 """阶段 5：聊天会话与消息持久化、越权、分页、失败记录测试。"""
 
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
+
+# 默认全量匹配；避免开发者本地 .env 设置 book_5b 影响测试预期。
+os.environ["QA_MATCH_SCOPE"] = "full"
 
 from src import api, auth_deps, db as db_module, rate_limit
 from src.schema import apply_migrations
@@ -155,7 +159,7 @@ def test_auth_ask_creates_conversation_and_saves_metadata(chat_client):
     assert assistant["content"] == "（测试讲解）"
     assert assistant["status"] == "completed"
     assert assistant["refused"] == 0
-    assert assistant["graph_version_id"] == "math:book:math_5b_rjb"
+    assert assistant["graph_version_id"] == "math:subject_full"
     assert assistant["context_graph_version_id"] == "math:subject_full"
     assert assistant["reply_to_message_id"] == msgs[0]["id"]
     assert json.loads(assistant["learning_path_json"])["body"] == "异分母分数加减法"
@@ -174,6 +178,62 @@ def test_auth_ask_creates_conversation_and_saves_metadata(chat_client):
     assert "body" in relations
     assert "prerequisite_required" in relations
     assert all(r["node_key"] for r in kps)
+
+
+def test_auth_ask_persists_exercises_and_returns_them_in_history(chat_client, monkeypatch):
+    """巩固练习要写入 learning_path_json，历史消息也要能还原。"""
+    client, db_path = chat_client
+    token = _register(client)
+    monkeypatch.setattr(
+        api.generator,
+        "generate",
+        lambda prompt: (
+            "【讲解】\n讲解正文。\n\n【巩固练习】\n"
+            "1. 题目：判断 3/5 是不是真分数。\n答案：是。\n"
+            "2. 题目：写一个分母为 8 的真分数。\n答案：1/8。"
+        ),
+    )
+
+    data = _ask(client, token, question="什么是真分数").json()
+    assert data["answer"] == "讲解正文。"
+    assert len(data["exercises"]) == 2
+    assert data["learning_path"]["exercises"] == data["exercises"]
+
+    assistant = _rows(
+        db_path,
+        "SELECT * FROM messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+    )[0]
+    stored_path = json.loads(assistant["learning_path_json"])
+    assert stored_path["exercises"] == data["exercises"]
+
+    history = client.get(
+        f"/api/conversations/{data['conversation_id']}/messages?limit=50",
+        headers=_auth(token),
+    ).json()
+    assistant_item = next(m for m in history["items"] if m["role"] == "assistant")
+    assert assistant_item["exercises"] == data["exercises"]
+    assert assistant_item["learning_path"]["exercises"] == data["exercises"]
+
+
+def test_idempotent_replay_returns_exercises(chat_client, monkeypatch):
+    """重复 client_request_id 时，重放结果也要带巩固练习。"""
+    client, _ = chat_client
+    token = _register(client)
+    monkeypatch.setattr(
+        api.generator,
+        "generate",
+        lambda prompt: (
+            "【讲解】\n讲解正文。\n\n【巩固练习】\n"
+            "1. 题目：判断题。\n答案：是。\n"
+            "2. 题目：填空题。\n答案：1/8。"
+        ),
+    )
+
+    first = _ask(client, token, client_request_id="req-exercises").json()
+    second = _ask(client, token, client_request_id="req-exercises").json()
+    assert second["deduplicated"] is True
+    assert second["exercises"] == first["exercises"]
+    assert second["learning_path"]["exercises"] == first["exercises"]
 
 
 def test_auth_ask_appends_to_existing_conversation(chat_client):
@@ -333,7 +393,7 @@ def test_refused_question_is_persisted_without_knowledge_points(chat_client):
     client, db_path = chat_client
     token = _register(client)
 
-    resp = _ask(client, token, question="什么是导数")
+    resp = _ask(client, token, question="如何做红烧肉")
     assert resp.status_code == 200
     data = resp.json()
     assert data["refused"] is True

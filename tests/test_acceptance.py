@@ -14,7 +14,7 @@ from src.linking import link_entity
 from src.loader import load_nodes
 from src.models import Edge, Node
 from src.refusal import LINK_THRESHOLD, link_top, refusal_message
-from src.subgraph import OUT_PATH
+from src.subgraph import OUT_PATH, RAW_PATH
 
 
 def test_a_异分母分数通分的诊断与溯源():
@@ -42,8 +42,8 @@ def test_a_异分母分数通分的诊断与溯源():
     assert "分数的加法和减法" in citation
 
 
-def test_b_什么是导数拒答():
-    """期望：链接分数低于阈值 → 拒答「当前知识库未覆盖该内容」，并给出最接近知识点。"""
+def test_b_五下子图仍拒答导数():
+    """旧 book_5b 范围下「什么是导数」仍应拒答；全量范围见下一个测试。"""
     nodes = load_nodes(OUT_PATH)
     node, score = link_top("什么是导数", nodes)
     assert score < LINK_THRESHOLD
@@ -53,6 +53,22 @@ def test_b_什么是导数拒答():
     assert msg["message"] == "当前知识库未覆盖该内容"
     assert msg["closest"] is not None
     assert msg["closest_name"] is not None
+
+
+def test_b2_全量模式导数已覆盖():
+    """全量图谱应覆盖高中「导数」。"""
+    nodes = load_nodes(RAW_PATH)
+    node, score = link_top("什么是导数", nodes)
+    assert node is not None
+    assert node.name == "导数"
+    assert score >= LINK_THRESHOLD
+
+
+def test_b3_全量模式域外问题拒答():
+    """扩展到全量数学图谱后，非数学问题仍应拒答。"""
+    nodes = load_nodes(RAW_PATH)
+    node, score = link_top("如何做红烧肉", nodes)
+    assert score < LINK_THRESHOLD
 
 
 def test_c_人为前置环报错并输出节点序列():

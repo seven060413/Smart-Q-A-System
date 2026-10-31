@@ -25,6 +25,6 @@ class QwenGenerator:
         resp = self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=800,
+            max_tokens=1200,
         )
         return resp.choices[0].message.content
