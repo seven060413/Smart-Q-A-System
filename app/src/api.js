@@ -86,6 +86,60 @@ function queryString(params) {
 }
 
 /**
+ * 语音转文字：上传录音到 /api/transcribe，返回 { text }。
+ * - App 端传本机临时文件路径 filePath；
+ * - H5 端传 File 对象 file（uni.uploadFile H5 2.6.15+ 支持），避免 blob URL 丢文件名；
+ * 响应 JSON 在 res.data 字符串中，需安全解析；错误沿用 ApiError/parseError 约定。
+ */
+export function transcribeAudio(filePath, { file = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      url: `${BASE_URL}/api/transcribe`,
+      name: 'file',
+      timeout: 60000,
+      header: {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          let data = null
+          try {
+            data = JSON.parse(res.data)
+          } catch (e) {
+            reject(new ApiError('识别结果解析失败，请重试', { status: 0, code: 'PARSE_ERROR' }))
+            return
+          }
+          resolve(data)
+          return
+        }
+        reject(parseError(res))
+      },
+      fail: (err) => {
+        const errMsg = (err && err.errMsg) || ''
+        const timeout = /timeout|超时/i.test(errMsg)
+        reject(
+          new ApiError(
+            timeout ? '识别请求超时，请重试' : '网络连接失败，请检查网络或后端服务地址',
+            { status: 0, code: timeout ? 'TIMEOUT' : 'NETWORK_ERROR' }
+          )
+        )
+      },
+    }
+    // 与 request() 的认证约定保持一致：已登录时附带令牌（该接口不强制认证）
+    const token = getStoredToken()
+    if (token) options.header.Authorization = `Bearer ${token}`
+
+    if (file) {
+      // H5：uni.uploadFile 即使传了 file 也要求 filePath 非空（内部校验），
+      // 这里给一个占位名；实际发送的是 file 对象本身。
+      options.file = file
+      options.filePath = (file && file.name) || 'audio'
+    } else {
+      options.filePath = filePath
+    }
+    uni.uploadFile(options)
+  })
+}
+
+/**
  * 问答：
  * - 游客不传 auth/conversationId，不落库；
  * - 登录用户传 auth=true，后端按令牌归属保存；

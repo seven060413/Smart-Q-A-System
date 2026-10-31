@@ -8,6 +8,10 @@ export const store = reactive({
   // 当前正在查看/继续的会话 id；为空表示下一次提问时由后端自动新建。
   currentConversationId: '',
 
+  // 首页是 tabBar 页面，switchTab 不能带参数；用它传递一次性的首页动作。
+  // { type: 'open', conversationId } | { type: 'new' } | { type: 'home' }
+  pendingIndexAction: null,
+
   // 登录状态：token/user 只来自后端响应；ready 表示是否已完成启动校验。
   auth: {
     token: '',

@@ -9,6 +9,14 @@
 			}
 		},
 		{
+			"path": "pages/my/my",
+			"style": {
+				"navigationBarTitleText": "我的",
+				"navigationBarBackgroundColor": "#2b6cb0",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/path/path",
 			"style": {
 				"navigationBarTitleText": "学习路径",
@@ -38,6 +46,28 @@
 		"navigationBarTitleText": "数学知识问答",
 		"navigationBarBackgroundColor": "#2b6cb0",
 		"backgroundColor": "#f5f6f8"
+	},
+	"easycom": {
+		"autoscan": true,
+		"custom": {
+			"^wd-(.*)": "@wot-ui/ui/components/wd-$1/wd-$1.vue"
+		}
+	},
+	"tabBar": {
+		"color": "#8a8f99",
+		"selectedColor": "#2b6cb0",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/index/index",
+				"text": "学习"
+			},
+			{
+				"pagePath": "pages/my/my",
+				"text": "我的"
+			}
+		]
 	},
 	"condition" : { //模式配置，仅开发期间生效
 		"current": 0, //当前激活的模式(list 的索引项)

@@ -6,11 +6,11 @@ import logging
 import sqlite3
 import time
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, File, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from . import chat_service
+from . import chat_service, speech
 from .auth_api import router as auth_router
 from .auth_deps import AuthContext, get_db, get_optional_auth_context
 from .chat_api import router as chat_router
@@ -44,6 +44,8 @@ app.add_middleware(
 graph = load_full_graph()
 kp_nodes = load_nodes(OUT_PATH)
 generator = QwenGenerator()
+# 语音转写适配层：只读环境变量，不额外初始化大模型
+transcriber = speech.SpeechTranscriber()
 
 
 class AskRequest(BaseModel):
@@ -263,3 +265,65 @@ def ask(
     result["assistant_message_id"] = assistant_msg["id"]
     result["created_at"] = assistant_msg["created_at"]
     return result
+
+
+# ===== 语音转文字 =====
+# 只负责把短音频变成文本，不参与检索/问答流水线，也不落盘音频。
+
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 首版 5MB 上限
+
+# 可接受格式：按文件头魔数识别，不信任客户端 Content-Type / 文件名
+_AUDIO_FORMATS = {
+    "mp3": ("audio/mpeg", "audio.mp3"),
+    "wav": ("audio/wav", "audio.wav"),
+    "ogg": ("audio/ogg", "audio.ogg"),
+    "webm": ("audio/webm", "audio.webm"),
+    "m4a": ("audio/mp4", "audio.m4a"),
+    "flac": ("audio/flac", "audio.flac"),
+}
+
+
+def _detect_audio_format(head: bytes) -> str | None:
+    """根据文件头返回规范格式名；无法识别返回 None。"""
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "wav"
+    if head[:3] == b"ID3":
+        return "mp3"
+    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
+        return "mp3"
+    if head[:4] == b"OggS":
+        return "ogg"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "webm"
+    if head[4:8] == b"ftyp":
+        return "m4a"
+    if head[:4] == b"fLaC":
+        return "flac"
+    return None
+
+
+@app.post("/api/transcribe")
+def transcribe(file: UploadFile = File(...)):
+    """语音转文字。
+
+    - 只接受常见短音频格式且 ≤ 5MB，校验失败/空文件/超限返回 4xx；
+    - 读取到内存后调用 ASR 适配层，不写临时文件，识别完即丢弃；
+    - 错误统一走 ApiError，不把密钥或供应商内部信息返回客户端。
+    """
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "AUDIO_TOO_LARGE", "音频文件过大，请控制在 5MB 以内")
+    if not data:
+        raise ApiError(400, "EMPTY_FILE", "未收到音频文件")
+
+    fmt = _detect_audio_format(data[:16])
+    if fmt is None:
+        raise ApiError(400, "UNSUPPORTED_FORMAT", "不支持的音频格式，请重新录制")
+
+    content_type, filename = _AUDIO_FORMATS[fmt]
+    try:
+        text = transcriber.transcribe(data, content_type, filename)
+    except speech.AsrError as exc:
+        raise ApiError(exc.status_code, exc.code, exc.message) from None
+
+    return {"text": text}

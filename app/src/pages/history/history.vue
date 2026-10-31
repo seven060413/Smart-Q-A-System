@@ -109,17 +109,19 @@ async function loadMore() {
 }
 
 function openConversation(item) {
-  uni.reLaunch({
-    url: `/pages/index/index?conversation_id=${encodeURIComponent(item.id)}`,
-  })
+  // 首页是 tabBar 页面，switchTab 不支持参数；通过 store 传递一次。
+  store.pendingIndexAction = { type: 'open', conversationId: item.id }
+  uni.switchTab({ url: '/pages/index/index' })
 }
 
 function newConversation() {
-  uni.reLaunch({ url: '/pages/index/index' })
+  store.pendingIndexAction = { type: 'new' }
+  uni.switchTab({ url: '/pages/index/index' })
 }
 
 function goHome() {
-  uni.reLaunch({ url: '/pages/index/index' })
+  store.pendingIndexAction = { type: 'home' }
+  uni.switchTab({ url: '/pages/index/index' })
 }
 
 function goAuth() {

@@ -1,7 +1,8 @@
-# ============ 后端依赖 ============
+﻿# ============ 后端依赖 ============
 # Web 框架
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+python-multipart>=0.0.9
 
 # 图存储与检索
 networkx>=3.3
@@ -11,7 +12,8 @@ FlagEmbedding>=1.2.10
 numpy==1.26.4
 
 # 文本生成：Qwen 在线接口（OpenAI 兼容协议）
-openai>=1.40.0
+# 语音识别 input_audio 要求 >= 1.52.0
+openai>=1.52.0
 
 # 配置与工具
 python-dotenv>=1.0.1
