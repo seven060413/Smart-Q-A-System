@@ -32,9 +32,8 @@
 | 后端 API | `http://114.55.116.162:18080` |
 | 接口文档 | `http://114.55.116.162:18080/docs` |
 
-> 该地址为课程演示用临时部署，实际地址在 `app/src/config.js` 中配置。
-> **注意**：公网这台当前跑的是较旧代码，不含注册/登录/聊天历史接口；体验学生端功能请先按
-> 下方「快速开始」在本地启动，并把 `config.js` 指向 `http://127.0.0.1:18080`。
+> 该地址为课程演示用临时部署，可能因关机/流量不可用；长期使用请按下方「快速开始」本地启动。
+> 公网/本地地址都在 `app/src/config.js` 中配置。
 
 ---
 
@@ -62,10 +61,13 @@ IKGR-system-eands/
 │   ├── refusal.py             # 拒答判定
 │   ├── generator.py           # Qwen 在线生成
 │   ├── pipeline.py            # 问答流水线 + Prompt 组装（含内部知识点元数据）
-│   ├── api.py                 # FastAPI 应用（问答 + 认证 + 聊天历史路由）
+│   ├── api.py                 # FastAPI 应用（问答 + 认证 + 聊天历史 + 视频路由）
+│   ├── videos.py              # 视频查询：approved/active、官方嵌入 URL
+│   ├── video_api.py           # /api/videos 路由
+│   ├── video_import.py        # 视频候选导入 / 审核共享逻辑
 │   │
 │   ├── db.py                  # SQLite 连接工厂（PRAGMA / 路径解析 / 备份）
-│   ├── schema.py              # 版本化迁移与 11 张表 DDL
+│   ├── schema.py              # 版本化迁移与 14 张表 DDL（含视频 3 张）
 │   ├── graph_import.py        # 图谱 JSON → SQLite 导入/删除逻辑
 │   ├── security.py            # scrypt 密码哈希、令牌生成/SHA-256
 │   ├── settings.py            # 认证相关环境变量读取
@@ -94,12 +96,14 @@ IKGR-system-eands/
 │   ├── test_db.py             # 数据库迁移
 │   ├── test_graph_import.py   # 图谱导入
 │   ├── test_auth.py           # 注册/登录/令牌安全
-│   └── test_chat.py           # 会话/消息持久化/越权/分页
+│   ├── test_chat.py           # 会话/消息持久化/越权/分页
+│   ├── test_videos.py         # 视频查询 / 官方嵌入 URL / 审核过滤
+│   └── test_video_import.py   # 视频候选导入 / 审核
 │
 ├── data/
 │   ├── README.md              # 数据来源、版本、授权说明
 │   ├── raw/
-│   │   └── math.json          # K12-KGraph 数学图谱（2711 节点 / 5273 边）
+│   │   └── math.json          # K12-KGraph 数学图谱（需单独下载，约 2.2MB）
 │   ├── processed/
 │   │   └── math_5b_knowledge_graph.json  # 五年级下册子图（67 节点 / 92 边）
 │   └── app/
@@ -114,19 +118,26 @@ IKGR-system-eands/
 │   │   ├── auth.js            # 注册/登录/退出/启动恢复状态逻辑
 │   │   ├── auth-storage.js    # 本地令牌/用户存储
 │   │   ├── store.js           # 跨页面共享数据（含登录态、当前会话）
+│   │   ├── video.js           # B 站官方嵌入 / 移动版 / 观看链接工具
 │   │   ├── pages.json         # 页面注册
 │   │   ├── manifest.json      # App 配置（name / appid / 权限）
 │   │   └── pages/
-│   │       ├── index/index.vue   # 首页：问答 + 三层折叠 + 拒答卡 + 历史入口
+│   │       ├── index/index.vue   # 首页：问答 + 三层折叠 + 视频卡 + 拒答卡
 │   │       ├── path/path.vue     # 学习路径：前置→本体→巩固 流程图
 │   │       ├── auth/auth.vue     # 登录 / 注册 / 账号 / 退出
-│   │       └── history/history.vue # 历史会话列表 / 打开 / 删除
+│   │       ├── history/history.vue # 历史会话列表 / 打开 / 删除
+│   │       └── video/video.vue   # APK 独立播放页（web-view）
 │   └── dist/                  # H5 构建产物（npm run build:h5）
 │
 ├── scripts/
 │   ├── verify_dataset.py      # 数据集核验：下载并统计真实的节点/关系类型
 │   ├── migrate.py             # 建库 / 应用迁移（--db 可选，status 查看状态）
-│   └── import_graph.py        # 图谱导入 / 删除版本（--json / --scope / --force / --delete-version）
+│   ├── import_graph.py        # 图谱导入 / 删除版本（--json / --scope / --force / --delete-version）
+│   ├── seed_approved_videos.py # 一键写入 6 条已审核示例视频（无需联网）
+│   ├── collect_videos.py      # CSV/JSON 导入视频候选
+│   ├── collect_videos_browser.py # 浏览器辅助搜索 B 站，写待审候选
+│   ├── review_videos.py       # 审核 / 补齐 aid-cid / 手工新增
+│   └── seed_demo_videos.py    # 演示视频（非正式内容，仅链路测试）
 │
 └── docs/
     ├── 选题 7操作手册.md
@@ -135,7 +146,10 @@ IKGR-system-eands/
     ├── 检索与融合设计.md
     ├── 真机调试与APK打包指南.md
     ├── 阿里云后端部署指南.md
+    ├── 后端更新与部署操作手册.md
     ├── 网页版运行指南.md
+    ├── video/
+    │   └── 视频关联实施记录.md
     ├── 学生端数据与接口设计.md
     └── 学生端登录与聊天记录实施计划.md
 ```
@@ -150,22 +164,30 @@ IKGR-system-eands/
 | Node.js | 18+（本项目实测 24.20） | 前端构建 |
 | HBuilderX | 4.41+ | 真机调试 / 云打包 APK |
 
+> **依赖说明**：
+> - 只运行后端 API / 网页版：安装 `requirements-server.txt` 即可（已含测试用 `pytest`）；
+> - `requirements.txt` 额外包含 bge-m3 / FlagEmbedding / torch，仅本地构建向量索引时需要，约 2GB；
+> - 视频功能没有新增 Python/JS 依赖；`collect_videos_browser.py` 需要本机 Chrome/Edge，但正常问答和播放不需要；
+> - `npm audit` 的 deprecated / vulnerabilities 主要来自 uni-app 工具链，**不要执行 `npm audit fix --force`**，升级可能破坏 uni-app 编译。
+
 ---
 
 ## 四、快速开始
 
 ### 1. 后端
 
-```bash
+```powershell
 # 创建虚拟环境
 python -m venv .venv
 
-# 安装依赖（本地完整版，会拉取 torch 约 2GB）
-.venv/Scripts/python.exe -m pip install -r requirements.txt
+# 安装服务端依赖（网页版/API 够用；需要 bge-m3 向量索引时再装 requirements.txt）
+.venv\Scripts\python.exe -m pip install -r requirements-server.txt
 
 # 复制环境变量模板并填写 Qwen 密钥
-cp .env.example .env
+Copy-Item .env.example .env
 ```
+
+> macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`，`Copy-Item` 换成 `cp`。
 
 `.env` 内容（**密钥用你自己的值，不要提交真实密钥**）：
 
@@ -181,18 +203,27 @@ AUTH_TOKEN_TTL_DAYS=30
 AUTH_RATE_LIMIT_ENABLED=true
 ```
 
-**建库并导入图谱**（首次运行必做）：
+**首次运行：数据、建库、图谱、示例视频**
 
-```bash
-# 1) 建库/迁移：创建 data/app/ikgr.db 和 11 张表
+```powershell
+# 0) 下载原始图谱（data/raw 不入库，必须单独下载）
+New-Item -ItemType Directory -Force -Path data\raw | Out-Null
+curl.exe -L -o data\raw\math.json "https://huggingface.co/datasets/lhpku20010120/K12-KGraph/resolve/main/K12-KGraph/subject_specific_KG/math.json"
+
+# 1) 建库/迁移：创建 data/app/ikgr.db 和 14 张表
 .venv/Scripts/python.exe scripts/migrate.py
 
 # 2) 导入全量数学图谱 + 五年级下册子图
 .venv/Scripts/python.exe scripts/import_graph.py --json data/raw/math.json --scope subject_full
 .venv/Scripts/python.exe scripts/import_graph.py --json data/processed/math_5b_knowledge_graph.json --scope book --book-id math_5b_rjb
+
+# 3) 写入 6 条已审核示例视频（视频卡需要；不需要联网）
+.venv/Scripts/python.exe scripts/seed_approved_videos.py
 ```
 
-> 导入可重复执行，内容未变会自动跳过；`--force` 可强制重导，`--delete-version <id>` 可删除某版本。原始 JSON 只读，不会删除或覆盖。
+> `data/processed/math_5b_knowledge_graph.json` 已随仓库提供；`data/raw/math.json` 约 2.2 MB，需要下载。
+> 导入可重复执行，内容未变会自动跳过；`--force` 可强制重导。
+> 示例视频只覆盖五年级下册 6 个知识点；正式内容用 `scripts/review_videos.py` 审核替换。
 
 **启动服务**（注意必须监听 `0.0.0.0` 才能被手机访问）：
 
@@ -207,6 +238,9 @@ AUTH_RATE_LIMIT_ENABLED=true
 ```bash
 curl http://127.0.0.1:18080/
 # {"service":"中小学教材知识图谱智能问答系统","docs":"/docs"}
+
+curl "http://127.0.0.1:18080/api/videos?node_key=math_5b_rjb_cpt18&limit=1"
+# items 里有 BV1aK411W7Vg、aid/cid 和 isOutside=true 的 embed_url
 ```
 
 ### 2. 前端
@@ -234,7 +268,7 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
 
 ```bash
 .venv/Scripts/python.exe -m pytest tests/ -q
-# 95 passed, 1 skipped
+# 124 passed, 1 skipped
 ```
 
 > 跳过的是真实 bge-m3 召回测试（需先构建向量索引）。
@@ -282,6 +316,17 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
 | GET | `/api/conversations/{id}/messages?limit=50&cursor=...` | 消息分页（按时间正序） |
 | DELETE | `/api/conversations/{id}` | 软删除会话 |
 
+### 知识点视频接口（公开只读）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/videos?node_key=...&node_key=...&limit=2` | 批量查询已审核视频；一次最多 20 个 node_key |
+
+只返回 `review_status='approved'` 且视频 `status='active'` 的记录。`node_key`
+来自 `/api/ask` 的 `prerequisite_gaps[i].id` 或 `learning_path.body_id`。
+返回的 `embed_url` 已带 `isOutside=true&aid=...&bvid=...&cid=...&p=...`，
+直接用于 H5 `iframe` 或 APK `web-view`。
+
 ### `POST /api/ask`
 
 **游客请求**（不落库）：
@@ -307,14 +352,17 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
   "answer": "……（Qwen 分层讲解）",
   "knowledge_point": "异分母分数加减法",
   "prerequisite_gaps": [
-    { "name": "同分母分数加减法", "required": true },
-    { "name": "通分方法", "required": true },
-    { "name": "分数的基本认识", "required": false }
+    { "id": "math_3a_rjb_cpt36", "name": "同分母分数加减法", "required": true },
+    { "id": "math_5b_rjb_skl9", "name": "通分方法", "required": true },
+    { "id": "math_3a_rjb_cpt35", "name": "分数的基本认识", "required": false }
   ],
   "learning_path": {
     "prerequisites": ["分数的基本认识", "通分方法", "同分母分数加减法"],
+    "prerequisite_ids": ["math_3a_rjb_cpt35", "math_5b_rjb_skl9", "math_3a_rjb_cpt36"],
     "body": "异分母分数加减法",
-    "consolidation": ["分数混合运算"]
+    "body_id": "math_5b_rjb_cpt35",
+    "consolidation": ["分数混合运算"],
+    "consolidation_ids": []
   },
   "source": "人教版五年级下册·分数的加法和减法",
   "refused": false,

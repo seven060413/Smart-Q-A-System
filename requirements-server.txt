@@ -9,3 +9,5 @@ openai>=1.52.0
 python-dotenv>=1.0.1
 # 语音上传接口 /api/transcribe 的 multipart 解析依赖
 python-multipart>=0.0.9
+# 运行测试需要（只部署运行时可删）
+pytest>=8.3
