@@ -25,6 +25,14 @@
 			}
 		},
 		{
+			"path": "pages/video/video",
+			"style": {
+				"navigationBarTitleText": "视频讲解",
+				"navigationBarBackgroundColor": "#2b6cb0",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/auth/auth",
 			"style": {
 				"navigationBarTitleText": "登录 / 注册",

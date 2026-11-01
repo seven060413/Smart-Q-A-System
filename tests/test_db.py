@@ -18,6 +18,9 @@ EXPECTED_TABLES = {
     "conversations",
     "messages",
     "message_knowledge_points",
+    "videos",
+    "knowledge_point_videos",
+    "video_candidates",
     "schema_migrations",
 }
 

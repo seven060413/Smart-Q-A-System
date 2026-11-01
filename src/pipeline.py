@@ -149,13 +149,23 @@ def run_qa(question, graph, kp_nodes, threshold: float | None = None) -> dict:
     path = build_learning_path(graph, node.id)
     citation = format_citation(graph, node.id)
 
-    gaps = [{"name": graph.nodes[i]["name"], "required": True} for i in diag["required"]]
-    gaps += [{"name": graph.nodes[i]["name"], "required": False} for i in diag["suggested"]]
+    # 名称用于展示，id 是稳定节点键，供视频检索等下游功能使用。
+    gaps = [
+        {"id": i, "name": graph.nodes[i]["name"], "required": True}
+        for i in diag["required"]
+    ]
+    gaps += [
+        {"id": i, "name": graph.nodes[i]["name"], "required": False}
+        for i in diag["suggested"]
+    ]
 
     learning_path = {
         "prerequisites": [graph.nodes[i]["name"] for i in path["prerequisites"]],
+        "prerequisite_ids": list(path["prerequisites"]),
         "body": node.name,
+        "body_id": node.id,
         "consolidation": [graph.nodes[i]["name"] for i in path["consolidation"]],
+        "consolidation_ids": list(path["consolidation"]),
         # 由 _fill_answer 生成后填入；先占位，保证接口字段稳定。
         "exercises": [],
     }

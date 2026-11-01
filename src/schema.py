@@ -207,8 +207,110 @@ CREATE INDEX ix_mkp_node
     ON message_knowledge_points(graph_version_id, node_key);
 """
 
+# version 2：知识点关联视频。
+# 说明：
+# - 视频按 node_key（graph_nodes.node_key / run_qa._meta.*.id）关联，不按
+#   (graph_version_id, node_key) 关联：本体与前置在 message_knowledge_points 中
+#   可能写入不同图谱版本，但 node_key 是同一套稳定 ID；
+# - 不建 node_key 到 graph_nodes 的外键：图谱版本 --force 重导会删节点，
+#   外键会阻塞重导；source_graph_version_id 只做来源记录；
+# - review_status 记在映射上，videos.status 记视频本身（失效/下架）；
+# - 只有 approved + active 会在查询接口返回。
+KNOWLEDGE_POINT_VIDEOS_SCHEMA = """
+CREATE TABLE videos (
+    id                  TEXT PRIMARY KEY,
+    platform            TEXT NOT NULL DEFAULT 'bilibili'
+                        CHECK (platform IN ('bilibili')),
+    bvid                TEXT NOT NULL,
+    page                INTEGER NOT NULL DEFAULT 1 CHECK (page >= 1),
+    aid                 INTEGER,
+    title               TEXT NOT NULL,
+    author              TEXT,
+    duration_seconds    INTEGER,
+    cover_url           TEXT,
+    watch_url           TEXT NOT NULL,
+    published_at        TEXT,
+    status              TEXT NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active', 'unavailable', 'hidden')),
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    CONSTRAINT uq_videos_bvid_page UNIQUE (platform, bvid, page)
+);
+CREATE INDEX ix_videos_status ON videos(status);
+
+CREATE TABLE knowledge_point_videos (
+    id                  INTEGER PRIMARY KEY,
+    course_id           TEXT NOT NULL DEFAULT 'math'
+                        REFERENCES courses(id) ON DELETE RESTRICT,
+    node_key            TEXT NOT NULL,
+    node_name           TEXT,
+    video_id            TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    relation            TEXT NOT NULL DEFAULT 'explains'
+                        CHECK (relation IN ('explains', 'prerequisite')),
+    rank                INTEGER NOT NULL DEFAULT 0,
+    review_status       TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (review_status IN ('pending', 'approved', 'rejected')),
+    review_note         TEXT,
+    reviewed_by         TEXT,
+    reviewed_at         TEXT,
+    source_graph_version_id TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    CONSTRAINT uq_kpv UNIQUE (course_id, node_key, video_id, relation),
+    CHECK (review_status <> 'approved' OR reviewed_at IS NOT NULL)
+);
+CREATE INDEX ix_kpv_lookup
+    ON knowledge_point_videos(course_id, node_key, review_status, rank);
+CREATE INDEX ix_kpv_video
+    ON knowledge_point_videos(video_id);
+
+CREATE TABLE video_candidates (
+    id                  INTEGER PRIMARY KEY,
+    course_id           TEXT NOT NULL DEFAULT 'math',
+    node_key            TEXT NOT NULL,
+    query               TEXT NOT NULL,
+    platform            TEXT NOT NULL DEFAULT 'bilibili',
+    bvid                TEXT NOT NULL,
+    page                INTEGER NOT NULL DEFAULT 1,
+    title               TEXT,
+    author              TEXT,
+    duration_seconds    INTEGER,
+    cover_url           TEXT,
+    play_count          INTEGER,
+    published_at        TEXT,
+    search_rank         INTEGER,
+    raw_json            TEXT NOT NULL DEFAULT '{}',
+    fetched_at          TEXT NOT NULL,
+    CONSTRAINT uq_video_candidates
+        UNIQUE (course_id, node_key, query, platform, bvid, page)
+);
+CREATE INDEX ix_video_candidates_pending
+    ON video_candidates(course_id, node_key, fetched_at);
+"""
+
+# version 3：B 站官方嵌入播放器需要的 aid / cid。
+# - videos.aid 在 version 2 已有，这里补 cid；
+# - video_candidates 增加 aid/cid，便于审核时或事后解析；
+# - 官方嵌入格式：?isOutside=true&aid=...&bvid=...&cid=...&p=...
+VIDEO_EMBED_METADATA_SCHEMA = """
+ALTER TABLE videos ADD COLUMN cid INTEGER;
+ALTER TABLE video_candidates ADD COLUMN aid INTEGER;
+ALTER TABLE video_candidates ADD COLUMN cid INTEGER;
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(version=1, name="initial_schema", sql=INITIAL_SCHEMA),
+    Migration(
+        version=2,
+        name="knowledge_point_videos",
+        sql=KNOWLEDGE_POINT_VIDEOS_SCHEMA,
+    ),
+    Migration(
+        version=3,
+        name="video_embed_metadata",
+        sql=VIDEO_EMBED_METADATA_SCHEMA,
+    ),
 ]
 
 

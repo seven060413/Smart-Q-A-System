@@ -160,6 +160,28 @@ export function askQuestion(
   })
 }
 
+/**
+ * 批量查询知识点关联视频（公开只读，不需要登录）。
+ * nodeKeys 为稳定知识点 ID（prerequisite_gaps[i].id / learning_path.body_id）。
+ */
+export function listVideos(nodeKeys, { limit = 2 } = {}) {
+  const keys = (Array.isArray(nodeKeys) ? nodeKeys : [nodeKeys]).filter(Boolean)
+  const params = keys.map((key) => `node_key=${encodeURIComponent(key)}`)
+  params.push(`limit=${encodeURIComponent(limit)}`)
+  // 审核结果会变化，加时间戳绕过浏览器对旧空结果的缓存。
+  params.push(`_t=${Date.now()}`)
+  return request(`/api/videos?${params.join('&')}`, { timeout: 15000 }).then((data) => {
+    // 防止代理把 /api/videos 回退成 index.html 时静默显示“暂无视频”。
+    if (!data || !Array.isArray(data.items)) {
+      throw new ApiError('视频接口返回格式异常，请检查后端地址', {
+        status: 0,
+        code: 'BAD_RESPONSE',
+      })
+    }
+    return data
+  })
+}
+
 export function createConversation(payload = {}) {
   return request('/api/conversations', {
     method: 'POST',

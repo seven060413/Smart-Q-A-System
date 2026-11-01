@@ -59,12 +59,67 @@
                   <text>📖 前置知识</text>
                   <text class="arrow">{{ msg.open.pre ? '▾' : '▸' }}</text>
                 </view>
-                <view v-if="msg.open.pre" class="section-body">
-                  <view v-for="(g, j) in msg.prerequisite_gaps" :key="j" class="gap">
-                    <text class="gap-name">{{ g.name }}</text>
-                    <text class="gap-tag" :class="g.required ? 't-required' : 't-suggest'">{{ g.required ? '必需' : '建议' }}</text>
+                <view v-if="msg.open.pre" class="section-body" @click.stop>
+                  <view v-for="(g, j) in msg.prerequisite_gaps" :key="g.id || j" class="gap-block">
+                    <view class="gap">
+                      <text class="gap-name">{{ g.name }}</text>
+                      <text class="gap-tag" :class="g.required ? 't-required' : 't-suggest'">{{ g.required ? '必需' : '建议' }}</text>
+                    </view>
+
+                    <view v-if="g.videos && g.videos.length" class="video-list">
+                      <view
+                        v-for="(v, k) in g.videos"
+                        :key="v.video_id"
+                        class="video-card"
+                        @click.stop="openVideo(g, v)"
+                      >
+                        <view class="video-cover">
+                          <image v-if="v.cover_url" :src="v.cover_url" mode="aspectFill" class="video-cover-img" />
+                          <view v-else class="video-cover-fallback">B站</view>
+                          <view class="video-play">▶</view>
+                          <text v-if="v.duration_seconds" class="video-duration">{{ formatDuration(v.duration_seconds) }}</text>
+                        </view>
+                        <view class="video-meta">
+                          <text class="video-title">{{ v.title }}</text>
+                          <text class="video-author">{{ v.author || 'B 站' }}</text>
+                        </view>
+                      </view>
+
+                      <!-- #ifdef H5 -->
+                      <!-- H5：官方播放器 iframe 直接放在折叠区内，随消息滚动 -->
+                      <view
+                        v-if="activeVideo && activeVideo.node_key === g.id"
+                        class="video-player"
+                        @click.stop
+                      >
+                        <iframe
+                          :src="activeVideo.embed_url"
+                          class="video-iframe"
+                          allowfullscreen="true"
+                          allow="autoplay; fullscreen; picture-in-picture"
+                          referrerpolicy="no-referrer-when-downgrade"
+                          frameborder="0"
+                        ></iframe>
+                        <view class="video-actions">
+                          <text class="video-action" @click.stop="closeVideo">收起播放器</text>
+                          <text class="video-action" @click.stop="openMobilePlayer(activeVideo)">移动版播放器</text>
+                          <text class="video-action" @click.stop="openWatchPage(activeVideo)">在 B 站打开</text>
+                        </view>
+                        <text v-if="!h264Supported" class="video-hint warn">当前浏览器缺少 H.264 解码能力，请改用 Chrome/Edge，或点“在 B 站打开”。</text>
+                        <text class="video-hint">若提示“不支持 HTML5 播放器”，请点“移动版播放器”或“在 B 站打开”。</text>
+                      </view>
+                      <!-- #endif -->
+                    </view>
+
+                    <view v-else-if="g.videosLoaded" class="video-empty-row">
+                      <text class="video-empty">暂无审核通过的视频</text>
+                      <text class="video-retry" @click.stop="loadVideos(msg)">刷新</text>
+                    </view>
                   </view>
+
                   <text v-if="msg.prerequisite_gaps.length === 0" class="empty">无</text>
+                  <text v-if="msg.videosNoIds" class="video-empty">当前消息缺少知识点编号，请重新提问或刷新页面</text>
+                  <text v-if="msg.videosError" class="video-empty">视频加载失败，重新展开可重试</text>
                 </view>
               </view>
 
@@ -177,10 +232,11 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
-import { askQuestion, listMessages, transcribeAudio } from '../../api.js'
+import { askQuestion, listMessages, listVideos, transcribeAudio } from '../../api.js'
 import AppTabBar from '../../components/AppTabBar.vue'
 import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
+import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
 
 const question = ref('')
 const loading = ref(false)
@@ -190,6 +246,16 @@ const messages = reactive([])
 const scrollTo = ref('')
 const messagesCursor = ref('')
 const hasEarlier = ref(false)
+// H5 折叠区内同一时间只保留一个播放器；APK 点击后跳独立播放页。
+const activeVideo = ref(null)
+// H5 浏览器是否具备 H.264 解码能力；缺失时 B 站播放器会提示不支持 HTML5。
+const h264Supported = ref(true)
+// #ifdef H5
+if (typeof document !== 'undefined') {
+  const probe = document.createElement('video')
+  h264Supported.value = !!probe.canPlayType('video/mp4; codecs="avc1.42E01E"')
+}
+// #endif
 
 // 语音输入：idle → recording → uploading → idle 的小状态机。
 // App 用 uni.getRecorderManager；H5 官方不支持该 API，改用浏览器 MediaRecorder。
@@ -892,8 +958,11 @@ function normalizeLearningPath(payload) {
   }
   return {
     prerequisites: Array.isArray(lp.prerequisites) ? lp.prerequisites : [],
+    prerequisite_ids: Array.isArray(lp.prerequisite_ids) ? lp.prerequisite_ids : [],
     body: lp.body || '',
+    body_id: lp.body_id || '',
     consolidation: Array.isArray(lp.consolidation) ? lp.consolidation : [],
+    consolidation_ids: Array.isArray(lp.consolidation_ids) ? lp.consolidation_ids : [],
     exercises,
   }
 }
@@ -908,6 +977,7 @@ function toUiMessages(items) {
     } else if (m.role === 'assistant') {
       out.push({
         role: 'ai',
+        id: m.id || '',
         answer: m.content || '',
         knowledge_point: m.knowledge_point || '',
         prerequisite_gaps: m.prerequisite_gaps || [],
@@ -918,6 +988,10 @@ function toUiMessages(items) {
         error_message: m.error_message || '',
         retryQuestion: lastUser,
         open: { pre: false, body: true, cons: false },
+        videosLoaded: false,
+        videosLoading: false,
+        videosError: false,
+        videosNoIds: false,
       })
     }
   }
@@ -1059,6 +1133,7 @@ function send() {
       }
       messages.push({
         role: 'ai',
+        id: data.assistant_message_id || '',
         answer: data.answer || '',
         knowledge_point: data.knowledge_point || '',
         prerequisite_gaps: data.prerequisite_gaps || [],
@@ -1069,6 +1144,10 @@ function send() {
         error_message: '',
         retryQuestion: q,
         open: { pre: false, body: true, cons: false },
+        videosLoaded: false,
+        videosLoading: false,
+        videosError: false,
+        videosNoIds: false,
       })
     })
     .catch((e) => {
@@ -1081,6 +1160,7 @@ function send() {
           : (e && e.message) || '网络请求失败，请检查后端是否启动、地址是否配置正确'
       messages.push({
         role: 'ai',
+        id: '',
         answer: '',
         refused: false,
         failed: true,
@@ -1091,6 +1171,10 @@ function send() {
         source: '',
         retryQuestion: q,
         open: { pre: false, body: true, cons: false },
+        videosLoaded: false,
+        videosLoading: false,
+        videosError: false,
+        videosNoIds: false,
       })
     })
     .finally(() => {
@@ -1099,8 +1183,88 @@ function send() {
     })
 }
 
+function openVideo(gap, video) {
+  // #ifdef H5
+  const current = activeVideo.value
+  if (
+    current &&
+    current.video_id === video.video_id &&
+    current.node_key === gap.id
+  ) {
+    activeVideo.value = null
+  } else {
+    activeVideo.value = { ...video, node_key: gap.id }
+  }
+  return
+  // #endif
+  // #ifndef H5
+  const bvid = encodeURIComponent(video.bvid || '')
+  const page = Number(video.page || 1)
+  const aid = encodeURIComponent(video.aid || '')
+  const cid = encodeURIComponent(video.cid || '')
+  const title = encodeURIComponent(video.title || '视频讲解')
+  uni.navigateTo({
+    url: `/pages/video/video?bvid=${bvid}&page=${page}&aid=${aid}&cid=${cid}&title=${title}`,
+  })
+  // #endif
+}
+
+function openMobilePlayer(video) {
+  if (!video) return
+  const mobileUrl = buildBilibiliMobileUrl(video.bvid, video.page)
+  if (!mobileUrl) return
+  activeVideo.value = { ...video, embed_url: mobileUrl }
+}
+
+function openWatchPage(video) {
+  if (!video || !video.watch_url) return
+  // #ifdef H5
+  window.open(video.watch_url, '_blank')
+  // #endif
+  // #ifdef APP-PLUS
+  plus.runtime.openURL(video.watch_url)
+  // #endif
+}
+
+function closeVideo() {
+  activeVideo.value = null
+}
+
+async function loadVideos(msg) {
+  // 每次展开都重新查询：审核结果可能变化，本地 SQLite 查询成本很低。
+  if (!msg || msg.videosLoading) return
+  const gaps = (msg.prerequisite_gaps || []).filter((g) => g && g.id)
+  if (!gaps.length) {
+    msg.videosLoaded = true
+    msg.videosNoIds = true
+    return
+  }
+  msg.videosNoIds = false
+
+  msg.videosLoading = true
+  msg.videosError = false
+  try {
+    const data = await listVideos(gaps.map((g) => g.id), { limit: 2 })
+    const byNode = {}
+    for (const item of data.items || []) {
+      byNode[item.node_key] = item.videos || []
+    }
+    for (const gap of gaps) {
+      gap.videos = byNode[gap.id] || []
+      gap.videosLoaded = true
+    }
+    msg.videosLoaded = true
+  } catch (e) {
+    msg.videosError = true
+    uni.showToast({ title: (e && e.message) || '视频加载失败', icon: 'none' })
+  } finally {
+    msg.videosLoading = false
+  }
+}
+
 function toggle(msg, key) {
   msg.open[key] = !msg.open[key]
+  if (key === 'pre' && msg.open.pre) loadVideos(msg)
 }
 
 function goPath(msg) {
@@ -1286,6 +1450,155 @@ function goPath(msg) {
 .t-suggest {
   background: #fff7e6;
   color: #dd6b20;
+}
+
+/* 前置知识下的视频卡 */
+.gap-block {
+  padding: 8rpx 0;
+}
+.gap-block + .gap-block {
+  border-top: 1rpx dashed #f2f2f2;
+}
+.video-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin: 4rpx 0 12rpx;
+}
+.video-card {
+  flex: 1 1 280rpx;
+  min-width: 240rpx;
+  max-width: 100%;
+  display: flex;
+  gap: 12rpx;
+  padding: 10rpx;
+  background: #f8fafc;
+  border: 1rpx solid #e6eef8;
+  border-radius: 14rpx;
+}
+.video-cover {
+  position: relative;
+  width: 160rpx;
+  height: 100rpx;
+  flex: 0 0 160rpx;
+  border-radius: 10rpx;
+  overflow: hidden;
+  background: #1f2a37;
+}
+.video-cover-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.video-cover-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 24rpx;
+  background: #2b6cb0;
+}
+.video-play {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 30rpx;
+  background: rgba(0, 0, 0, 0.28);
+}
+.video-duration {
+  position: absolute;
+  right: 6rpx;
+  bottom: 6rpx;
+  font-size: 18rpx;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.62);
+  padding: 0 6rpx;
+  border-radius: 4rpx;
+}
+.video-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.video-title {
+  font-size: 24rpx;
+  color: #333;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.video-author {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: #999;
+}
+.video-empty {
+  display: block;
+  font-size: 22rpx;
+  color: #bbb;
+  padding: 4rpx 0 8rpx;
+}
+.video-empty-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.video-retry {
+  font-size: 22rpx;
+  color: #2b6cb0;
+  padding: 4rpx 0 8rpx;
+}
+.video-player {
+  width: 100%;
+  flex: 1 0 100%;
+  margin: 8rpx 0 16rpx;
+}
+.video-iframe {
+  width: 100%;
+  height: 380rpx;
+  border: 0;
+  border-radius: 12rpx;
+  background: #000;
+}
+.video-close {
+  display: block;
+  text-align: center;
+  font-size: 22rpx;
+  color: #2b6cb0;
+  padding: 8rpx 0;
+}
+.video-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 20rpx;
+  padding: 8rpx 0;
+}
+.video-action {
+  font-size: 22rpx;
+  color: #2b6cb0;
+}
+.video-hint {
+  display: block;
+  text-align: center;
+  font-size: 20rpx;
+  color: #bbb;
+  padding: 0 0 8rpx;
+}
+.video-hint.warn {
+  color: #c05621;
 }
 .empty {
   font-size: 26rpx;

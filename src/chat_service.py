@@ -96,9 +96,101 @@ def conversation_to_dict(row) -> dict:
     }
 
 
-def message_to_dict(row) -> dict:
+def _load_message_knowledge_points(
+    conn, message_ids: list[str]
+) -> dict[str, dict[str, list[dict]]]:
+    """按消息批量读取知识点关联，供历史消息回填 node_key。
+
+    返回 {message_id: {relation: [{id, name}, ...]}}；relation 为 body /
+    prerequisite_required / prerequisite_suggested / consolidation。
+    """
+    if not message_ids:
+        return {}
+    placeholders = ",".join("?" for _ in message_ids)
+    rows = conn.execute(
+        f"SELECT message_id, relation, node_key, node_name, ordinal "
+        f"FROM message_knowledge_points "
+        f"WHERE message_id IN ({placeholders}) "
+        f"ORDER BY message_id, ordinal",
+        tuple(message_ids),
+    ).fetchall()
+
+    result: dict[str, dict[str, list[dict]]] = {}
+    for row in rows:
+        by_relation = result.setdefault(row["message_id"], {})
+        by_relation.setdefault(row["relation"], []).append(
+            {"id": row["node_key"], "name": row["node_name"] or ""}
+        )
+    return result
+
+
+def _enrich_message_knowledge_points(
+    payload: dict, by_relation: dict[str, list[dict]] | None
+) -> dict:
+    """把 message_knowledge_points 中的稳定 ID 合并进历史消息。
+
+    新消息的 learning_path_json / prerequisite_gaps_json 已带 ID；
+    这里主要为功能上线前的老消息补 ID，缺失字段才填，不覆盖已有值。
+    """
+    if not by_relation:
+        return payload
+
+    required = by_relation.get("prerequisite_required", [])
+    suggested = by_relation.get("prerequisite_suggested", [])
+    gap_items = required + suggested
+    name_to_id: dict[str, str] = {}
+    for item in gap_items:
+        name_to_id.setdefault(item.get("name", ""), item.get("id", ""))
+    positional_ids = [item.get("id", "") for item in gap_items]
+
+    gaps = payload.get("prerequisite_gaps") or []
+    if isinstance(gaps, list):
+        for index, gap in enumerate(gaps):
+            if not isinstance(gap, dict) or gap.get("id"):
+                continue
+            name = gap.get("name") or ""
+            if name_to_id.get(name):
+                gap["id"] = name_to_id[name]
+            elif index < len(positional_ids):
+                gap["id"] = positional_ids[index]
+        payload["prerequisite_gaps"] = gaps
+
+    learning_path = payload.get("learning_path")
+    if not isinstance(learning_path, dict):
+        return payload
+
+    body = by_relation.get("body", [])
+    if body and not learning_path.get("body_id"):
+        learning_path["body_id"] = body[0].get("id")
+
+    if not learning_path.get("prerequisite_ids"):
+        path_names = learning_path.get("prerequisites") or []
+        learning_path["prerequisite_ids"] = [
+            name_to_id[name] for name in path_names if name_to_id.get(name)
+        ]
+
+    if not learning_path.get("consolidation_ids"):
+        consolidation = by_relation.get("consolidation", [])
+        consolidation_by_name: dict[str, str] = {}
+        for item in consolidation:
+            consolidation_by_name.setdefault(
+                item.get("name", ""), item.get("id", "")
+            )
+        path_names = learning_path.get("consolidation") or []
+        learning_path["consolidation_ids"] = [
+            consolidation_by_name[name]
+            for name in path_names
+            if consolidation_by_name.get(name)
+        ]
+
+    return payload
+
+
+def message_to_dict(
+    row, knowledge_points: dict[str, list[dict]] | None = None
+) -> dict:
     learning_path = _loads(row["learning_path_json"], None)
-    return {
+    payload = {
         "id": row["id"],
         "role": row["role"],
         "content": row["content"],
@@ -117,6 +209,7 @@ def message_to_dict(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    return _enrich_message_knowledge_points(payload, knowledge_points)
 
 
 def encode_cursor(payload: dict) -> str:
@@ -288,7 +381,9 @@ def list_messages(
         next_cursor = encode_cursor(
             {"created_at": last["created_at"], "seq": last["seq"]}
         )
-    items = [message_to_dict(r) for r in reversed(rows)]
+    ordered = list(reversed(rows))
+    kp_map = _load_message_knowledge_points(conn, [r["id"] for r in ordered])
+    items = [message_to_dict(r, kp_map.get(r["id"])) for r in ordered]
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
@@ -496,8 +591,12 @@ def _insert_knowledge_points(
         )
 
 
-def stored_turn_response(user_row, assistant_row) -> dict:
-    """把已存在的问答对转成 /api/ask 响应（用于幂等重放）。"""
+def stored_turn_response(user_row, assistant_row, conn=None) -> dict:
+    """把已存在的问答对转成 /api/ask 响应（用于幂等重放）。
+
+    conn 不为空时从 message_knowledge_points 补齐 node_key，保证旧记录
+    重放时前端仍能按稳定 ID 查询视频。
+    """
     if assistant_row is None:
         raise ApiError(
             409,
@@ -517,7 +616,7 @@ def stored_turn_response(user_row, assistant_row) -> dict:
             },
         )
     learning_path = _loads(assistant_row["learning_path_json"], None)
-    return {
+    payload = {
         "answer": assistant_row["content"],
         "exercises": (learning_path or {}).get("exercises", []),
         "knowledge_point": assistant_row["knowledge_point"],
@@ -532,3 +631,9 @@ def stored_turn_response(user_row, assistant_row) -> dict:
         "created_at": assistant_row["created_at"],
         "deduplicated": True,
     }
+    if conn is not None:
+        kp_map = _load_message_knowledge_points(conn, [assistant_row["id"]])
+        payload = _enrich_message_knowledge_points(
+            payload, kp_map.get(assistant_row["id"])
+        )
+    return payload

@@ -32,7 +32,10 @@ def test_ask_异分母分数通分():
     assert data["source"].startswith("人教版五年级下册")
     assert data["answer"] == "（测试讲解）"
     assert any(g["name"] == "通分方法" for g in data["prerequisite_gaps"])
+    assert all(g.get("id") for g in data["prerequisite_gaps"])
     assert data["learning_path"]["body"] == "异分母分数加减法"
+    assert data["learning_path"]["body_id"]
+    assert data["learning_path"]["prerequisite_ids"]
 
 
 def test_ask_导数已覆盖():

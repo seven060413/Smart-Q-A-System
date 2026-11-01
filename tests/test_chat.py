@@ -180,6 +180,21 @@ def test_auth_ask_creates_conversation_and_saves_metadata(chat_client):
     assert all(r["node_key"] for r in kps)
 
 
+def test_history_returns_knowledge_point_ids(chat_client):
+    """历史消息也要带稳定 node_key，供视频查询使用。"""
+    client, _ = chat_client
+    token = _register(client)
+    data = _ask(client, token).json()
+
+    history = client.get(
+        f"/api/conversations/{data['conversation_id']}/messages?limit=50",
+        headers=_auth(token),
+    ).json()
+    assistant = next(m for m in history["items"] if m["role"] == "assistant")
+    assert assistant["learning_path"]["body_id"]
+    assert all(g.get("id") for g in assistant["prerequisite_gaps"])
+
+
 def test_auth_ask_persists_exercises_and_returns_them_in_history(chat_client, monkeypatch):
     """巩固练习要写入 learning_path_json，历史消息也要能还原。"""
     client, db_path = chat_client

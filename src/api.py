@@ -21,6 +21,7 @@ from .loader import load_nodes
 from .pipeline import run_qa, split_generated_answer
 from .settings import qa_match_scope
 from .subgraph import OUT_PATH, RAW_PATH
+from .video_api import router as video_router
 
 logger = logging.getLogger("ikgr.chat")
 
@@ -30,6 +31,7 @@ app = FastAPI(title="中小学教材知识图谱智能问答系统")
 install_error_handlers(app)
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(video_router)
 
 # CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域。
 # 阶段 2.5（HTTPS/反向代理）会把这里收紧为白名单；当前保持现状以兼容旧前端。
@@ -40,6 +42,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_store_api(request: Request, call_next):
+    """API 响应禁止浏览器/代理缓存。
+
+    /api/ask、历史消息和视频审核结果都会随数据库变化；缓存旧响应会导致
+    前端看到过期的空视频列表或缺少 node_key 的旧消息。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 # 启动时加载图谱、知识点与生成器
 graph = load_full_graph()
@@ -193,7 +208,7 @@ def ask(
                     "该请求编号已用于其他会话",
                 )
             return chat_service.stored_turn_response(
-                existing_user, existing_assistant
+                existing_user, existing_assistant, conn
             )
 
     # 3) 运行检索/诊断流水线（不调用大模型，先拿到结构化证据）
@@ -233,7 +248,7 @@ def ask(
             )
             if existing_user is not None:
                 return chat_service.stored_turn_response(
-                    existing_user, existing_assistant
+                    existing_user, existing_assistant, conn
                 )
         raise
 
