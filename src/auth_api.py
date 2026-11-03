@@ -4,7 +4,7 @@
 """
 
 from __future__ import annotations
-
+from urllib.parse import unquote
 import re
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -18,6 +18,7 @@ from .auth_deps import (
     get_logout_session,
 )
 from .errors import ApiError
+from .captcha import verify_tencent_captcha
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
@@ -45,6 +46,10 @@ class RegisterRequest(BaseModel):
     username: str
     password: str = Field(min_length=8, max_length=128)
     display_name: str | None = None
+
+    ticket: str = Field(..., description="滑块验证票据")
+    randstr: str = Field(..., description="滑块验证随机字符串")
+
 
     @field_validator("username")
     @classmethod
@@ -78,6 +83,9 @@ class LoginRequest(BaseModel):
 
     username: str
     password: str
+
+    ticket: str = Field(..., description="滑块验证票据")
+    randstr: str = Field(..., description="滑块验证随机字符串")
 
     @field_validator("username")
     @classmethod
@@ -141,6 +149,8 @@ def register(
         )
     rate_limit.record_register(ip)
 
+    verify_tencent_captcha(unquote(req.ticket), unquote(req.randstr))
+
     return auth_service.register_user(
         conn,
         req.username,
@@ -166,6 +176,10 @@ def login(
             "登录尝试过于频繁，请稍后再试",
             headers={"Retry-After": str(retry_after)},
         )
+
+    print("====== 准备开始校验滑块验证码 ======")
+    verify_tencent_captcha(unquote(req.ticket), unquote(req.randstr))
+    print("====== 滑块验证码校验成功通过 ======")
 
     try:
         result = auth_service.login_user(
