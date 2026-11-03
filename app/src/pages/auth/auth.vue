@@ -76,9 +76,18 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref , onMounted} from 'vue'
 import { store } from '../../store.js'
 import { login, logout, register } from '../../auth.js'
+
+onMounted(() => {
+  if (!window.TencentCaptcha) {
+    const script = document.createElement('script')
+    script.src = 'https://turing.captcha.qcloud.com/TJCaptcha.js'
+    script.async = true
+    document.head.appendChild(script)
+  }
+})
 
 const mode = ref('login')
 const loading = ref(false)
@@ -162,28 +171,61 @@ function messageFor(err) {
   }
 }
 
-async function submit() {
+function submit() {
   if (loading.value) return
   error.value = ''
   if (!validate()) return
 
+  // 1. 准备要发送的基础数据
+  const payload = {
+    username: form.username.trim(),
+    password: form.password,
+  }
+  if (mode.value === 'register') {
+    const displayName = form.displayName.trim()
+    if (displayName) {
+      payload.display_name = displayName
+    }
+  }
+
+  // 2. 检查腾讯 JS 是否加载完成
+  if (!window.TencentCaptcha) {
+    error.value = '验证码组件加载中，请稍后重试'
+    return
+  }
+
+  // 3. 唤起腾讯滑块
+  const captcha = new window.TencentCaptcha('193796404', (res) => {
+    if (res.ret === 0) {
+      // 验证成功！把票据塞进 payload
+      payload.ticket = encodeURIComponent(res.ticket);
+      payload.randstr = encodeURIComponent(res.randstr);
+      
+      // 4. 去发请求
+      doRealRequest(payload)
+    } else if (res.ret === 2) {
+      // 用户主动关闭了验证码弹窗
+      error.value = '您已取消验证'
+    } else {
+      error.value = '验证失败，请重试'
+    }
+  })
+  
+  // 显示滑块
+  captcha.show()
+}
+
+// 👇 新增：真正发请求的函数（从原 submit 中剥离出来的）
+async function doRealRequest(payload) {
   loading.value = true
   try {
-    const payload = {
-      username: form.username.trim(),
-      password: form.password,
-    }
     if (mode.value === 'register') {
-      const displayName = form.displayName.trim()
-      if (displayName) {
-        payload.display_name = displayName
-      }
       await register(payload)
     } else {
       await login(payload)
     }
 
-    // 成功后立刻清掉页面里的密码，避免停留在内存/输入框里。
+    // 成功后立刻清掉页面里的密码
     form.password = ''
     form.confirm = ''
     uni.showToast({
