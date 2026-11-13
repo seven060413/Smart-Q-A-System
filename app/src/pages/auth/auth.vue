@@ -2,8 +2,12 @@
   <view class="page">
     <!-- 已登录：账号信息 + 退出 -->
     <view v-if="loggedIn" class="card account-card">
-      <view class="avatar">👤</view>
-      <text class="display-name">{{ store.auth.user.display_name || store.auth.user.username }}</text>
+      <!-- 👇 修改：支持本地自定义头像 -->
+      <image v-if="customAvatar" :src="customAvatar" class="avatar-img" mode="aspectFill" />
+      <view v-else class="avatar">👤</view>
+      
+      <!-- 👇 修改：支持最新修改的昵称 -->
+      <text class="display-name">{{ displayName }}</text>
       <text class="username">@{{ store.auth.user.username }}</text>
 
       <view class="info-list">
@@ -76,7 +80,8 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app' // 👈 新增引入 onShow
 import { store } from '../../store.js'
 import { login, logout, register } from '../../auth.js'
 
@@ -97,6 +102,25 @@ const roleLabel = computed(() => {
   if (role === 'admin') return '管理员'
   return '学生'
 })
+
+// ================= 👇 新增：头像和昵称本地缓存逻辑 👇 =================
+const customAvatar = ref('')
+const customNickname = ref('')
+
+// 显示优先级：本地修改的昵称 > 后端返回的昵称 > 账号名
+const displayName = computed(() => {
+  return customNickname.value || store.auth.user?.display_name || store.auth.user?.username || ''
+})
+
+// 每次进入页面都读取最新缓存
+onShow(() => {
+  const savedAvatar = uni.getStorageSync('user_avatar')
+  customAvatar.value = savedAvatar || ''
+  
+  const savedNickname = uni.getStorageSync('custom_nickname')
+  customNickname.value = savedNickname || ''
+})
+// ====================================================================
 
 function switchMode(next) {
   if (loading.value) return
@@ -356,6 +380,14 @@ function formatTime(iso) {
   align-items: center;
   justify-content: center;
   font-size: 56rpx;
+}
+/* 👇 新增：自定义头像的样式，大小和圆角与原有的完全一致 */
+.avatar-img {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: #e8f0fb;
+  object-fit: cover;
 }
 .display-name {
   margin-top: 20rpx;

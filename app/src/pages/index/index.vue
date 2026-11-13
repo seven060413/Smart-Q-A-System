@@ -1,11 +1,26 @@
 <template>
   <view class="page">
-    <!-- 登录状态栏：游客也能问答，登录用于保存账号状态 -->
+    <!-- 引入侧边栏 -->
+    <Sidebar 
+      :visible="showSidebar" 
+      :currentMenu="currentMenu"
+      @close="showSidebar = false"
+      @select-menu="onSelectMenu"
+    />
+
+    <!-- 登录状态栏 -->
     <view class="topbar">
-      <text class="topbar-state">{{ authStateText }}</text>
+      <view class="topbar-left">
+        <!-- 汉堡菜单按钮 -->
+        <text class="menu-btn" @click="showSidebar = true" aria-label="打开菜单">☰</text>
+        <text class="topbar-state">{{ authStateText }}</text>
+      </view>
+      
       <view class="topbar-actions">
         <text v-if="store.auth.user" class="topbar-link" @click="newConversation">新对话</text>
+        <!-- 历史链接跳转到历史页面 -->
         <text v-if="store.auth.user" class="topbar-link" @click="goHistory">历史</text>
+        <!-- 账号链接保持不变 -->
         <text class="topbar-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录 / 注册' }}</text>
       </view>
     </view>
@@ -25,28 +40,23 @@
 
       <!-- 消息列表 -->
       <view v-for="(msg, i) in messages" :key="i" :id="'msg-' + i" class="msg-row">
-        <!-- 用户气泡（右） -->
         <view v-if="msg.role === 'user'" class="msg msg-user">
           <view class="bubble bubble-user">{{ msg.text }}</view>
         </view>
 
-        <!-- AI 回答气泡（左） -->
         <view v-else class="msg msg-ai">
           <view class="bubble bubble-ai">
-            <!-- 生成失败卡 -->
             <view v-if="msg.failed" class="failed-card">
               <view class="failed-title">⚠️ 回答生成失败</view>
               <view class="failed-text">{{ msg.error_message || '请稍后重新提问' }}</view>
               <button v-if="msg.retryQuestion" class="retry-btn" @click="retry(msg)">重新提问</button>
             </view>
 
-            <!-- 拒答卡 -->
             <view v-else-if="msg.refused" class="refuse-card">
               <view class="refuse-title">⚠️ {{ msg.answer }}</view>
               <view v-if="msg.knowledge_point" class="refuse-closest">最接近知识点：{{ msg.knowledge_point }}</view>
             </view>
 
-            <!-- 正常回答 -->
             <template v-else>
               <view class="head">
                 <text class="chip">{{ msg.knowledge_point }}</text>
@@ -86,7 +96,6 @@
                       </view>
 
                       <!-- #ifdef H5 -->
-                      <!-- H5：官方播放器 iframe 直接放在折叠区内，随消息滚动 -->
                       <view
                         v-if="activeVideo && activeVideo.node_key === g.id"
                         class="video-player"
@@ -174,7 +183,7 @@
       </view>
     </scroll-view>
 
-    <!-- 底部输入区：状态行在上方，控件顺序固定为 输入框 → 语音 → 发送 -->
+    <!-- 底部输入区 -->
     <view class="composer">
       <view class="record-row">
         <template v-if="voiceSupported && recordState === 'recording'">
@@ -234,9 +243,31 @@ import { computed, reactive, ref, watch } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { askQuestion, listMessages, listVideos, transcribeAudio } from '../../api.js'
 import AppTabBar from '../../components/AppTabBar.vue'
+import Sidebar from './Sidebar.vue' 
 import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
 import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
+
+// 侧边栏控制状态
+const showSidebar = ref(false)
+const currentMenu = ref('study')
+
+// 用于实时显示最新的本地缓存昵称
+const currentNickname = ref('')
+
+// 处理侧边栏点击菜单事件
+function onSelectMenu(menu) {
+  currentMenu.value = menu.key
+  showSidebar.value = false
+  
+  if (menu.key === 'history') {
+    goHistory()
+  } else if (menu.key === 'profile') {
+    goAuth()
+  } else if (menu.key !== 'study') {
+    uni.showToast({ title: `即将开发：${menu.name}`, icon: 'none' })
+  }
+}
 
 const question = ref('')
 const loading = ref(false)
@@ -246,10 +277,9 @@ const messages = reactive([])
 const scrollTo = ref('')
 const messagesCursor = ref('')
 const hasEarlier = ref(false)
-// H5 折叠区内同一时间只保留一个播放器；APK 点击后跳独立播放页。
 const activeVideo = ref(null)
-// H5 浏览器是否具备 H.264 解码能力；缺失时 B 站播放器会提示不支持 HTML5。
 const h264Supported = ref(true)
+
 // #ifdef H5
 if (typeof document !== 'undefined') {
   const probe = document.createElement('video')
@@ -257,8 +287,6 @@ if (typeof document !== 'undefined') {
 }
 // #endif
 
-// 语音输入：idle → recording → uploading → idle 的小状态机。
-// App 用 uni.getRecorderManager；H5 官方不支持该 API，改用浏览器 MediaRecorder。
 const recordState = ref('idle')
 const recordSeconds = ref(0)
 const recordStarting = ref(false)
@@ -267,7 +295,6 @@ let recorder = null
 let recordTimer = null
 let pendingCancel = false
 let pendingStart = false
-// 每次开始/中止录音都递增，用于丢弃过期回调（取消、离开页面、旧上传）
 let recordSession = 0
 let activeRecordSession = 0
 
@@ -282,8 +309,6 @@ let h5Stream = null
 let h5Recorder = null
 let h5Chunks = []
 let h5MimeType = ''
-// 优先选 Qwen-ASR 明确支持的 MP4/AAC；浏览器只提供 webm/ogg 时，
-// 上传前转换成 WAV（Qwen 文档明确支持）。
 const H5_MIME_CANDIDATES = [
   'audio/mp4;codecs=mp4a.40.2',
   'audio/mp4',
@@ -308,7 +333,6 @@ function startRecordTimer() {
   stopRecordTimer()
   recordTimer = setInterval(() => {
     recordSeconds.value += 1
-    // 30 秒上限：App 端由 start(duration) 自动停止，这里计时并兜底
     if (recordSeconds.value >= 30) {
       stopRecordTimer()
       if (recordState.value === 'recording') stopCurrentRecording()
@@ -323,7 +347,6 @@ function stopRecordTimer() {
   }
 }
 
-// 停止当前录音（上传/清理由各自的 onStop 处理）
 // #ifdef APP-PLUS
 function stopCurrentRecording() {
   if (!recorder) return
@@ -380,7 +403,6 @@ function resetRecordState() {
   recordSeconds.value = 0
 }
 
-// 取消/离开页面：让进行中的回调与上传结果全部失效，并复位界面
 function invalidateRecordSession() {
   recordSession += 1
   pendingCancel = true
@@ -406,7 +428,6 @@ function showRecordPermissionModal(deniedAlways) {
 function requestRecordPermission() {
   return new Promise((resolve) => {
     // #ifdef APP-PLUS
-    // uni.authorize 不支持 App 端；Android 用 5+ 原生运行时权限 API。
     if (typeof plus !== 'undefined' && plus.android && plus.android.requestPermissions) {
       const permission = 'android.permission.RECORD_AUDIO'
       try {
@@ -432,12 +453,10 @@ function requestRecordPermission() {
           }
         )
       } catch (err) {
-        // 无法判断权限时，交给录音 API 自行触发系统授权
         resolve(true)
       }
       return
     }
-    // iOS 等平台：首次录音时由系统弹窗
     resolve(true)
     // #endif
     // #ifndef APP-PLUS
@@ -446,7 +465,6 @@ function requestRecordPermission() {
   })
 }
 
-// 等待授权期间可能已跳到其他页面
 function isIndexPageActive() {
   const pages = getCurrentPages()
   const current = pages[pages.length - 1]
@@ -454,7 +472,6 @@ function isIndexPageActive() {
   return route === 'pages/index/index'
 }
 
-// ===== H5 录音（浏览器 MediaRecorder）=====
 // #ifdef H5
 function checkH5RecorderSupport() {
   if (typeof window === 'undefined' || window.isSecureContext === false) {
@@ -534,8 +551,8 @@ function encodeWav(audioBuffer) {
   writeString(8, 'WAVE')
   writeString(12, 'fmt ')
   view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true) // PCM
-  view.setUint16(22, 1, true) // 单声道
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
   view.setUint32(24, audioBuffer.sampleRate, true)
   view.setUint32(28, audioBuffer.sampleRate * 2, true)
   view.setUint16(32, 2, true)
@@ -551,7 +568,6 @@ function encodeWav(audioBuffer) {
   return new Blob([view], { type: 'audio/wav' })
 }
 
-// 浏览器只能录 webm/ogg 时，转成 Qwen 明确支持的 WAV（16kHz 单声道）
 async function blobToWav(blob) {
   const AudioCtor = window.AudioContext || window.webkitAudioContext
   const OfflineCtor = window.OfflineAudioContext || window.webkitOfflineAudioContext
@@ -614,7 +630,6 @@ async function beginH5Recording(token) {
     return
   }
 
-  // 等待授权期间已取消、离开页面或跳到其他页面
   if (token !== recordSession || !isIndexPageActive()) {
     stopTracks(stream)
     return
@@ -680,7 +695,6 @@ async function beginH5Recording(token) {
 }
 
 async function finishH5Recording(session, sessionChunks, stream, detectedType) {
-  // 过期回调（已取消、离开页面或已开始新录音）：不要碰当前录音的状态
   if (session !== recordSession) {
     stopTracks(stream)
     return
@@ -713,8 +727,6 @@ async function finishH5Recording(session, sessionChunks, stream, detectedType) {
     return
   }
 
-  // 统一转成 Qwen 明确支持的 WAV（16kHz 单声道）；
-  // 转换失败时，若原始格式本身受支持（MP4/AAC），退回原文件上传。
   recordState.value = 'uploading'
   let mimeType = 'audio/wav'
   try {
@@ -746,7 +758,7 @@ function toggleRecord() {
     return
   }
   if (recordState.value === 'recording') {
-    stopCurrentRecording() // onStop 中决定上传
+    stopCurrentRecording()
     return
   }
   if (recordState.value === 'uploading' || pendingStart || recordStarting.value) return
@@ -765,14 +777,12 @@ async function startRecording() {
   const token = recordSession
   try {
     // #ifdef APP-PLUS
-    // 只在用户点击麦克风后进入这里申请权限；App 启动时不请求麦克风
     const allowed = await requestRecordPermission()
     if (!allowed) return
     // #endif
     // #ifdef H5
     if (!checkH5RecorderSupport()) return
     // #endif
-    // 等待授权期间用户已取消、离开页面或跳到其他页面
     if (token !== recordSession || !isIndexPageActive()) return
 
     // #ifdef APP-PLUS
@@ -799,7 +809,6 @@ function beginAppRecording() {
   recordSeconds.value = 0
   recordState.value = 'recording'
   try {
-    // App 端支持的格式：aac / mp3 / wav / PCM，默认 mp3
     recorder.start({
       format: 'mp3',
       sampleRate: 16000,
@@ -828,7 +837,6 @@ function uploadRecording(filePath, session, options = {}) {
         uni.showToast({ title: '未识别到有效语音，请重试', icon: 'none' })
         return
       }
-      // 已有输入时追加并加空格，不静默覆盖
       const current = question.value.trim()
       question.value = current ? `${current} ${text}` : text
       uni.showToast({
@@ -847,7 +855,6 @@ function uploadRecording(filePath, session, options = {}) {
 
 if (recorder) {
   recorder.onStart(() => {
-    // 授权后立刻取消、或页面已离开
     if (activeRecordSession !== recordSession || pendingCancel) {
       try {
         recorder.stop()
@@ -864,7 +871,6 @@ if (recorder) {
     const recordedSeconds = recordSeconds.value
     stopRecordTimer()
 
-    // 已取消、已离开页面或已开始新录音：丢弃这次结果
     if (session !== recordSession) return
 
     if (pendingCancel) {
@@ -879,7 +885,6 @@ if (recorder) {
       return
     }
 
-    // App 端 onStop 不一定返回 duration，用计时器兜底
     const durationMs = (res && res.duration) || recordedSeconds * 1000
     if (durationMs < 500) {
       resetRecordState()
@@ -897,13 +902,11 @@ if (recorder) {
   })
 }
 
-// 离开页面或 App 进入后台：停止录音并复位，不保留未完成的识别结果。
 onHide(() => {
   // #ifdef H5
   if (recordState.value !== 'idle' || pendingStart) invalidateRecordSession()
   // #endif
   // #ifdef APP-PLUS
-  // 不处理 pendingStart，避免系统权限弹窗触发 onHide 时误中止首次授权
   if (recordState.value !== 'idle') invalidateRecordSession()
   // #endif
 })
@@ -912,10 +915,11 @@ onUnload(() => {
   invalidateRecordSession()
 })
 
+// 优先读取本地缓存昵称
 const authStateText = computed(() => {
   if (!store.auth.ready) return '正在检查登录状态…'
   if (store.auth.user) {
-    return '已登录：' + (store.auth.user.display_name || store.auth.user.username)
+    return '已登录：' + (currentNickname.value || store.auth.user.display_name || store.auth.user.username)
   }
   return '游客模式'
 })
@@ -935,6 +939,8 @@ function clearConversationView() {
   messagesCursor.value = ''
   hasEarlier.value = false
   scrollTo.value = ''
+  // 👇 新增：清空时，同时清除本地缓存
+  uni.removeStorageSync('last_conversation_id')
 }
 
 function newConversation() {
@@ -944,7 +950,7 @@ function newConversation() {
 }
 
 function newRequestId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID()
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
@@ -1008,6 +1014,9 @@ async function loadConversation(conversationId) {
     const page = await listMessages(conversationId, { limit: 50 })
     messages.splice(0, messages.length, ...toUiMessages(page.items))
     store.currentConversationId = conversationId
+    // 👇 新增：成功加载后，更新本地缓存
+    uni.setStorageSync('last_conversation_id', conversationId)
+    
     messagesCursor.value = page.next_cursor || ''
     hasEarlier.value = !!page.has_more
 
@@ -1060,7 +1069,6 @@ function retry(msg) {
 }
 
 onLoad((options) => {
-  // 使用自定义悬浮导航，隐藏原生 tabBar（只保留 switchTab 能力）
   hideNativeTabBar()
 
   if (options && options.conversation_id) {
@@ -1068,7 +1076,6 @@ onLoad((options) => {
     if (store.auth.ready) {
       loadConversation(conversationId)
     } else {
-      // 冷启动直接打开某个历史会话时，等 initAuth 恢复登录态后再加载。
       const stop = watch(
         () => store.auth.ready,
         (ready) => {
@@ -1080,31 +1087,44 @@ onLoad((options) => {
       )
     }
   } else {
-    store.currentConversationId = ''
+    // 👇 修复：如果 URL 没有带 id，尝试从本地缓存恢复上次的会话
+    const lastId = uni.getStorageSync('last_conversation_id')
+    if (lastId && !store.currentConversationId) {
+      store.currentConversationId = lastId
+    }
   }
 })
 
-// 首页是 tabBar 页面，switchTab 不能带参数；由历史页通过 store 传递一次性动作。
 onShow(() => {
   hideNativeTabBar()
 
-  const action = store.pendingIndexAction
-  if (!action) return
-  store.pendingIndexAction = null
+  // 每次页面显示，重新读取最新缓存昵称
+  const savedNickname = uni.getStorageSync('custom_nickname')
+  currentNickname.value = savedNickname || ''
 
-  if (action.type === 'open' && action.conversationId) {
-    loadConversation(action.conversationId)
-    return
+  const action = store.pendingIndexAction
+  if (action) {
+    store.pendingIndexAction = null
+
+    if (action.type === 'open' && action.conversationId) {
+      loadConversation(action.conversationId)
+      return
+    }
+    if (action.type === 'new') {
+      if (loading.value || recordStarting.value || recordState.value !== 'idle') return
+      clearConversationView()
+      return
+    }
   }
-  if (action.type === 'new') {
-    if (loading.value || recordStarting.value || recordState.value !== 'idle') return
-    clearConversationView()
+
+  // 👇 核心修复：如果页面被重新挂载，但之前有会话 ID 或本地缓存，且消息列表为空，自动重新加载
+  let activeId = store.currentConversationId || uni.getStorageSync('last_conversation_id')
+  if (activeId && messages.length === 0 && !historyLoading.value && !loading.value) {
+    loadConversation(activeId)
   }
-  // action.type === 'home'：保持当前问答页不变
 })
 
 function scrollBottom() {
-  // 先清空再赋值，触发 scroll-into-view 重新定位
   scrollTo.value = ''
   setTimeout(() => {
     scrollTo.value = 'msg-' + (messages.length - 1)
@@ -1130,6 +1150,8 @@ function send() {
     .then((data) => {
       if (data.conversation_id) {
         store.currentConversationId = data.conversation_id
+        // 👇 新增：每次提问成功，都把最新会话 ID 保存到本地缓存
+        uni.setStorageSync('last_conversation_id', data.conversation_id)
       }
       messages.push({
         role: 'ai',
@@ -1153,6 +1175,7 @@ function send() {
     .catch((e) => {
       if (e && e.status === 404) {
         store.currentConversationId = ''
+        uni.removeStorageSync('last_conversation_id')
       }
       const errMsg =
         e && e.status === 401
@@ -1231,7 +1254,6 @@ function closeVideo() {
 }
 
 async function loadVideos(msg) {
-  // 每次展开都重新查询：审核结果可能变化，本地 SQLite 查询成本很低。
   if (!msg || msg.videosLoading) return
   const gaps = (msg.prerequisite_gaps || []).filter((g) => g && g.id)
   if (!gaps.length) {
@@ -1276,6 +1298,7 @@ function goPath(msg) {
 </script>
 
 <style>
+/* ...原有样式全部保留... */
 .page {
   height: 100vh;
   display: flex;
@@ -1283,34 +1306,68 @@ function goPath(msg) {
   background: #f5f6f8;
 }
 
-/* H5 的导航栏和 tabBar 是固定定位，页面高度需扣除二者及底部安全区域 */
 /* #ifdef H5 */
 .page {
   height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px));
 }
 /* #endif */
 
-/* 登录状态栏 */
+/* 优化后的顶部栏样式 */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14rpx 24rpx;
-  background: #fff;
-  border-bottom: 1rpx solid #eee;
+  padding: 20rpx 32rpx; 
+  background: #ffffff;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
+  position: relative;
+  z-index: 10;
 }
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.menu-btn {
+  font-size: 36rpx;
+  color: #333;
+  cursor: pointer;
+  font-weight: bold;
+  padding-right: 8rpx;
+  transition: transform 0.1s;
+}
+.menu-btn:active {
+  transform: scale(0.9); 
+}
+
 .topbar-state {
   font-size: 24rpx;
   color: #888;
+  background: #f4f5f7; 
+  padding: 4rpx 16rpx;
+  border-radius: 20rpx;
 }
-.topbar-link {
-  font-size: 24rpx;
-  color: #2b6cb0;
-}
+
 .topbar-actions {
   display: flex;
-  gap: 24rpx;
+  gap: 12rpx; 
   align-items: center;
+}
+
+.topbar-link {
+  font-size: 26rpx;
+  color: #444; 
+  padding: 8rpx 16rpx; 
+  border-radius: 12rpx;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.topbar-link:active {
+  background: #f0f2f5;
+  color: #2b6cb0; 
 }
 
 .load-earlier {
@@ -1327,7 +1384,6 @@ function goPath(msg) {
   box-sizing: border-box;
 }
 
-/* 欢迎 */
 .welcome {
   margin-top: 120rpx;
   display: flex;
@@ -1345,7 +1401,6 @@ function goPath(msg) {
   line-height: 1.6;
 }
 
-/* 消息行 */
 .msg-row {
   margin-bottom: 24rpx;
 }
@@ -1359,7 +1414,6 @@ function goPath(msg) {
   justify-content: flex-start;
 }
 
-/* 气泡 */
 .bubble {
   max-width: 86%;
   padding: 20rpx 24rpx;
@@ -1383,7 +1437,6 @@ function goPath(msg) {
   color: #999;
 }
 
-/* AI 头部：知识点 + 出处 */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -1403,7 +1456,6 @@ function goPath(msg) {
   color: #999;
 }
 
-/* 折叠面板 */
 .section {
   border-top: 1rpx solid #f0f0f0;
   padding: 16rpx 0;
@@ -1452,7 +1504,6 @@ function goPath(msg) {
   color: #dd6b20;
 }
 
-/* 前置知识下的视频卡 */
 .gap-block {
   padding: 8rpx 0;
 }
@@ -1633,7 +1684,6 @@ function goPath(msg) {
   margin-bottom: 8rpx;
 }
 
-/* 拒答卡 */
 .refuse-card {
   background: #fff5f5;
   border: 1rpx solid #feb2b2;
@@ -1651,7 +1701,6 @@ function goPath(msg) {
   color: #9b2c2c;
 }
 
-/* 生成失败卡 */
 .failed-card {
   background: #fffaf0;
   border: 1rpx solid #fbd38d;
@@ -1684,7 +1733,6 @@ function goPath(msg) {
   border: none;
 }
 
-/* 学习路径按钮 */
 .path-btn {
   margin-top: 20rpx;
   background: #e8f0fb;
@@ -1699,13 +1747,11 @@ function goPath(msg) {
   border: none;
 }
 
-/* 底部输入区 */
 .composer {
   background: #fff;
   border-top: 1rpx solid #eee;
 }
 
-/* 录音/识别状态行：固定高度，避免输入栏控件上下跳动 */
 .record-row {
   height: 44rpx;
   display: flex;
@@ -1725,7 +1771,6 @@ function goPath(msg) {
   color: #2b6cb0;
 }
 
-/* 控件顺序：输入框 → 语音 → 发送；输入框自适应，按钮固定宽度 */
 .input-bar {
   display: flex;
   align-items: center;
@@ -1778,7 +1823,6 @@ function goPath(msg) {
   height: 40rpx;
   display: block;
 }
-/* 供读屏软件读取的可访问名称（视觉上隐藏） */
 .sr-only {
   position: absolute;
   width: 1px;
