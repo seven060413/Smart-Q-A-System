@@ -5,15 +5,16 @@
 
 ---
 
-## 0. 打包前必须先补两处（否则一定失败）
+## 0. 打包前检查（当前仓库已基本填好）
 
-| 项 | 现状 | 要改成 |
+| 项 | 当前值 | 说明 |
 | -- | -- | -- |
-| `app/src/manifest.json` 的 `name` | 空 | 如 `数学知识问答` |
-| `app/src/manifest.json` 的 `appid` | 空 | 在 HBuilderX 里「重新获取 appid」，形如 `__UNI__XXXXXXX` |
-| `app/src/config.js` 的 `BASE_URL` | `127.0.0.1:18080` | 手机要访问电脑，必须改成局域网 IP，见第 4 节 |
+| `app/src/manifest.json` 的 `name` | `数学知识问答` | 已填；改名后需重新打包 |
+| `app/src/manifest.json` 的 `appid` | `__UNI__91D2DC9` | 已填；换 appid 需在 HBuilderX 重新获取 |
+| `app/src/config.js` 的 `BASE_URL` | `https://seventeen17.com.cn` | 线上/真机默认；本地联调可改局域网 IP，见第 4 节 |
 
-**获取 appid 的方法**：HBuilderX 打开项目 → 双击 `manifest.json` → 左侧「基础配置」→ 点「重新获取 appid」（需登录 DCloud 账号，免费注册）。
+**如果 appid 为空**：HBuilderX 打开项目 → 双击 `manifest.json` → 左侧「基础配置」→
+点「重新获取 appid」（需登录 DCloud 账号，免费注册）。
 
 ---
 
@@ -91,7 +92,7 @@
 
 ### 4.1 App 里的后端地址是否正确
 
-打开 [app/src/config.js](../app/src/config.js)，确认：
+打开 [app/src/config.js](../../app/src/config.js)，确认：
 
 ```js
 export const BASE_URL = 'http://192.168.105.137:18080'

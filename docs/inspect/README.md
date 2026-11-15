@@ -1,5 +1,9 @@
 # IKGR 仓库审查与清理报告
 
+> **文档整理说明（2026-11-15）**：`docs/` 已按 `deploy/`、`dev/`、`design/`、`voice/`、
+> `video/`、`qa/`、`frontend/`、`inspect/` 重组。本报告中的旧路径保留为审查当时的记录；
+> 当前文档结构以根目录 README 为准。
+
 - **审查日期**：2026-11-15
 - **仓库**：`seven060413/Smart-Q-A-System`（GitHub）
 - **审查时仓库可见性**：**Public（公开）**

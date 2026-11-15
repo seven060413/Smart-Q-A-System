@@ -1,4 +1,4 @@
-# 中小学教材知识图谱智能问答系统（选题 7）
+# 中小学教材知识图谱智能问答系统
 
 面向中小学生的教材知识图谱问答系统。以**北京大学 K12-KGraph** 公开数据集为底座，
 构建数学学科知识图谱，实现「**先补前置、再讲本体**」的可溯源问答：
@@ -140,18 +140,36 @@ IKGR-system-eands/
 │   └── seed_demo_videos.py    # 演示视频（非正式内容，仅链路测试）
 │
 └── docs/
-    ├── 选题 7操作手册.md
-    ├── 需求分析与方案策划报告1.docx
+    ├── 选题7操作手册.md
     ├── 数据集核验方法.md
-    ├── 检索与融合设计.md
-    ├── 真机调试与APK打包指南.md
-    ├── 阿里云后端部署指南.md
-    ├── 后端更新与部署操作手册.md
-    ├── 网页版运行指南.md
+    ├── deploy/
+    │   ├── 后端部署与更新手册.md
+    │   ├── HTTPS部署指南.md
+    │   └── 网页版运行指南.md
+    ├── dev/
+    │   ├── 真机调试与APK打包指南.md
+    │   └── 语音输入实现教程.md
+    ├── voice/
+    │   ├── 语音识别实现原理.md
+    │   └── 语音识别配置步骤.md
+    ├── design/
+    │   ├── 检索与融合设计.md
+    │   ├── 学生端数据与接口设计.md
+    │   ├── 学生端实施计划.md
+    │   └── 需求分析与方案策划报告1.docx
     ├── video/
     │   └── 视频关联实施记录.md
-    ├── 学生端数据与接口设计.md
-    └── 学生端登录与聊天记录实施计划.md
+    ├── qa/
+    │   └── 问答覆盖范围扩展与评估.md
+    ├── frontend/
+    │   └── 底部导航改造记录.md
+    └── inspect/
+        ├── README.md
+        ├── 01-问题文件清单.md
+        ├── 02-代码与文档清理建议.md
+        ├── 03-gitignore-proposed.txt
+        ├── 04-清理执行手册-PowerShell.md
+        └── 05-泄露处置与善后.md
 ```
 
 ---
@@ -258,8 +276,8 @@ npm run build:h5        # 构建 H5 产物到 app/dist/build/h5
 **修改后端地址**：编辑 [app/src/config.js](app/src/config.js)
 
 ```js
-export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
-// export const BASE_URL = 'http://114.55.116.162:18080'   // 云服务器
+export const BASE_URL = 'https://seventeen17.com.cn'   // 线上/真机
+// 本地调试：export const BASE_URL = 'http://127.0.0.1:18080'
 ```
 
 > 地址是**编译时写死**的，改完必须重新运行到真机或重新打包 APK。
@@ -268,7 +286,7 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
 
 ```bash
 .venv/Scripts/python.exe -m pytest tests/ -q
-# 124 passed, 1 skipped
+# 127 passed, 1 skipped
 ```
 
 > 跳过的是真实 bge-m3 召回测试（需先构建向量索引）。
@@ -387,6 +405,10 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
 
 其他接口：`GET /`（服务信息）、`GET /docs`（Swagger 文档）。
 
+> 当前还实现了 `POST /api/transcribe`（语音转文字）、`/api/attachments/*`（附件/PDF）、
+> `/api/check-answer`、`/api/knowledge/{id}`、`PUT /api/auth/profile`（资料/头像）等；
+> 完整列表以 `/docs`（Swagger）和对应功能文档为准。
+
 统一错误结构：
 
 ```json
@@ -429,13 +451,18 @@ export const BASE_URL = 'http://127.0.0.1:18080'   // 本地后端
 
 | 场景 | 文档 |
 | --- | --- |
-| **其他人克隆后如何查看网页版** | [docs/网页版运行指南.md](docs/网页版运行指南.md) |
-| 阿里云 ECS 部署（公网访问） | [docs/阿里云后端部署指南.md](docs/阿里云后端部署指南.md) |
-| **每次后端更新如何发布（打包/备份/部署/回滚）** | [docs/后端更新与部署操作手册.md](docs/后端更新与部署操作手册.md) |
-| 真机调试 / APK 云打包 | [docs/真机调试与APK打包指南.md](docs/真机调试与APK打包指南.md) |
-| 检索与融合规则依据 | [docs/检索与融合设计.md](docs/检索与融合设计.md) |
-| **学生端数据与接口设计** | [docs/学生端数据与接口设计.md](docs/学生端数据与接口设计.md) |
-| **学生端登录与聊天记录实施计划** | [docs/学生端登录与聊天记录实施计划.md](docs/学生端登录与聊天记录实施计划.md) |
+| **其他人克隆后如何查看网页版** | [docs/deploy/网页版运行指南.md](docs/deploy/网页版运行指南.md) |
+| **阿里云 ECS 首次部署 / 日常更新（打包/备份/迁移/回滚）** | [docs/deploy/后端部署与更新手册.md](docs/deploy/后端部署与更新手册.md) |
+| **HTTPS + DNS + 安全组 + 证书续期** | [docs/deploy/HTTPS部署指南.md](docs/deploy/HTTPS部署指南.md) |
+| 真机调试 / APK 云打包 | [docs/dev/真机调试与APK打包指南.md](docs/dev/真机调试与APK打包指南.md) |
+| 语音输入方案总览 | [docs/dev/语音输入实现教程.md](docs/dev/语音输入实现教程.md) |
+| 语音识别原理 / 配置 | [docs/voice/语音识别实现原理.md](docs/voice/语音识别实现原理.md)、[docs/voice/语音识别配置步骤.md](docs/voice/语音识别配置步骤.md) |
+| 视频知识点关联记录 | [docs/video/视频关联实施记录.md](docs/video/视频关联实施记录.md) |
+| 问答覆盖范围评估 | [docs/qa/问答覆盖范围扩展与评估.md](docs/qa/问答覆盖范围扩展与评估.md) |
+| 前端底部导航改造 | [docs/frontend/底部导航改造记录.md](docs/frontend/底部导航改造记录.md) |
+| 检索与融合规则依据 | [docs/design/检索与融合设计.md](docs/design/检索与融合设计.md) |
+| **学生端数据与接口设计** | [docs/design/学生端数据与接口设计.md](docs/design/学生端数据与接口设计.md) |
+| **学生端实施计划 / 当前状态** | [docs/design/学生端实施计划.md](docs/design/学生端实施计划.md) |
 
 **服务端最小依赖**（不装 torch）：
 
@@ -447,8 +474,9 @@ pip install -r requirements-server.txt
 > 数据库文件 `data/app/ikgr.db` 不随 Git 提交；新环境需先 `scripts/migrate.py` 建库，
 > 再 `scripts/import_graph.py` 导入图谱。
 
-> ⚠️ HTTPS 尚未完成（域名 `seventeen17.com.cn` 已解析、ICP 备案进行中）。
-> 当前公网仍是 HTTP，**不要把真实学生密码放到公网 HTTP 上测试**。
+> ✅ HTTPS 已启用：`https://seventeen17.com.cn`（Nginx + Let's Encrypt，HTTP 301 跳转）。
+> 部署、DNS、安全组与证书续期见 [docs/deploy/HTTPS部署指南.md](docs/deploy/HTTPS部署指南.md)。
+> ICP 备案状态以阿里云后台为准。
 
 ---
 
@@ -474,9 +502,12 @@ final = 0.7 × text_score + 0.3 × graph_score
 - 图谱结构是第二证据（补全前置知识，不改变主答案）→ 权重 0.3；
 - 两通道均归一化到 [0,1]，量纲一致才可直接加权。
 
+> 说明：当前 `/api/ask` 实际运行的是实体链接 + 图谱/学习路径 + Qwen 生成；
+> `retrieval.py` / `fusion.py` 的双通道检索已实现并有测试，但尚未接入 `pipeline.py`。
+
 ### 3. 拒答阈值
 
-实体链接分数 `< 0.2` 判定为知识库未覆盖：
+实体链接分数 `< 0.35` 判定为知识库未覆盖：
 库内问句最高分约 0.49+，仅靠单字偶然命中的库外问句约 0.15。
 
 ### 4. 环检测（杀手用例）
@@ -502,7 +533,7 @@ final = 0.7 × text_score + 0.3 × graph_score
 - [x] 按年级 + importance 筛选（五年级下册 59 个知识点）
 - [x] 子图抽取（`data/processed/`）
 - [x] 实验 4 图谱构建（NetworkX、传递闭包、环检测）
-- [x] 实体链接 + 双通道检索 + 融合
+- [x] 实体链接 + 图谱通道；双通道 `retrieval`/`fusion` 已有模块和测试，当前未接入 `pipeline`
 - [x] 实验 3 前置诊断、实验 8 学习路径、拒答
 - [x] Qwen 生成 + FastAPI 接口（CORS）
 - [x] 前端首页（聊天气泡 + 三层折叠 + 拒答卡）
@@ -514,8 +545,12 @@ final = 0.7 × text_score + 0.3 × graph_score
 - [x] 前端登录 / 注册页、登录状态、令牌存取与 401 处理
 - [x] 聊天会话与消息持久化（会话列表 / 消息分页 / 软删除 / 失败记录 / 幂等重试）
 - [x] 前端历史会话列表与打开历史会话
-- [ ] HTTPS / ICP 备案（域名 `seventeen17.com.cn` 已解析，备案完成后做反向代理 + 证书）
-- [ ] 学生端端到端检查与文档收尾
+- [x] 语音输入（App RecorderManager / H5 MediaRecorder，后端 `/api/transcribe`）
+- [x] 附件上传与 PDF 解析（`/api/attachments/*`）
+- [x] 用户头像持久化（`users.avatar` + 资料编辑页）
+- [x] 知识点视频关联、审核与 `/api/videos`
+- [x] HTTPS 反向代理与证书（`https://seventeen17.com.cn` 已启用；ICP 以阿里云后台为准）
+- [ ] 学生端端到端检查与文档收尾（阶段 6）
 - [ ] bge-m3 向量索引构建（真实召回测试当前 skip）
 - [ ] 评测模块（抽样自动评测 + 人工抽检）
 
@@ -536,4 +571,4 @@ final = 0.7 × text_score + 0.3 × graph_score
 | `localhost:5173` 打不开 | 开发服务器监听 IPv6；用 `http://127.0.0.1:5173/`，或手机用 `http://<电脑局域网 IP>:5173/` |
 | Qwen 调用 401 | 检查 `.env` 中 `QWEN_API_KEY` |
 | Qwen 连接错误 | 网络问题，`dashscope.aliyuncs.com` 可能暂时不可达 |
-| 公网仍是 HTTP 明文 | HTTPS 尚未完成（ICP 备案进行中）；不要把真实学生密码放到公网 HTTP 上 |
+| 公网 HTTPS | 已启用 `https://seventeen17.com.cn`，HTTP 会 301 跳转；证书续期见 [docs/deploy/HTTPS部署指南.md](docs/deploy/HTTPS部署指南.md) |
