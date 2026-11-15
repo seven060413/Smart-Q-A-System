@@ -39,6 +39,38 @@ def _validate_login_password(value: str) -> str:
     return value
 
 
+class UpdateProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=32)
+    avatar: str | None = Field(default=None, max_length=2000000)
+
+    @field_validator("display_name")
+    @classmethod
+    def _display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if len(value) > 32:
+            raise ValueError("展示名不能超过 32 个字符")
+        if any(ord(ch) < 32 for ch in value):
+            raise ValueError("展示名不能包含控制字符")
+        return value
+
+    @field_validator("avatar")
+    @classmethod
+    def _avatar(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if len(value) > 2_000_000:
+            raise ValueError("头像数据过大（最大 2MB）")
+        if not (value.startswith("data:image/") or value.startswith("http://") or value.startswith("https://")):
+            raise ValueError("头像格式无效，需为 base64 图片或 URL")
+        return value
+
+
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,6 +127,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     role: str
+    avatar: str = ""
     created_at: str
     last_login_at: str | None = None
 
@@ -198,3 +231,18 @@ def logout(
     if session is not None:
         auth_service.revoke_session(conn, session["session_id"])
     return Response(status_code=204)
+
+
+@router.put("/profile", response_model=UserOut, summary="更新个人资料")
+def update_profile(
+    req: UpdateProfileRequest,
+    ctx: AuthContext = Depends(get_auth_context),
+    conn=Depends(get_db),
+):
+    """更新当前登录用户的昵称和/或头像。"""
+    return auth_service.update_profile(
+        conn,
+        ctx.user["id"],
+        display_name=req.display_name,
+        avatar=req.avatar,
+    )

@@ -63,9 +63,11 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { store } from '../../store.js'
+import { updateProfile } from '../../api.js'
 
 const customAvatar = ref('')
 const customNickname = ref('')
+const saving = ref(false)
 
 // 弹窗状态
 const showNicknameModal = ref(false)
@@ -81,11 +83,21 @@ const displayNickname = computed(() => {
 const userInitial = computed(() => displayNickname.value.charAt(0))
 
 onMounted(() => {
-  const savedAvatar = uni.getStorageSync('user_avatar')
-  if (savedAvatar) customAvatar.value = savedAvatar
+  // 优先用后端返回的 avatar，fallback 到本地缓存
+  if (store.auth.user?.avatar) {
+    customAvatar.value = store.auth.user.avatar
+  } else {
+    const savedAvatar = uni.getStorageSync('user_avatar')
+    if (savedAvatar) customAvatar.value = savedAvatar
+  }
   
-  const savedNickname = uni.getStorageSync('custom_nickname')
-  if (savedNickname) customNickname.value = savedNickname
+  // 优先用后端返回的 display_name，fallback 到本地缓存
+  if (store.auth.user?.display_name) {
+    customNickname.value = store.auth.user.display_name
+  } else {
+    const savedNickname = uni.getStorageSync('custom_nickname')
+    if (savedNickname) customNickname.value = savedNickname
+  }
 })
 
 // 返回上一页
@@ -103,10 +115,11 @@ function changeAvatar() {
       const tempFilePath = res.tempFilePaths[0]
       // #ifdef H5
       const reader = new FileReader()
-      reader.onload = (e) => {
-        customAvatar.value = e.target.result
-        uni.setStorageSync('user_avatar', e.target.result)
-        uni.showToast({ title: '头像修改成功', icon: 'none' })
+      reader.onload = async (e) => {
+        const base64 = e.target.result
+        customAvatar.value = base64
+        uni.setStorageSync('user_avatar', base64)
+        await saveAvatarToServer(base64)
       }
       reader.readAsDataURL(res.tempFiles[0])
       // #endif
@@ -114,16 +127,37 @@ function changeAvatar() {
       uni.getFileSystemManager().readFile({
         filePath: tempFilePath,
         encoding: 'base64',
-        success: (data) => {
+        success: async (data) => {
           const base64Str = 'data:image/jpeg;base64,' + data.data
           customAvatar.value = base64Str
           uni.setStorageSync('user_avatar', base64Str)
-          uni.showToast({ title: '头像修改成功', icon: 'none' })
+          await saveAvatarToServer(base64Str)
         }
       })
       // #endif
     }
   })
+}
+
+/** 同步头像到后端 */
+async function saveAvatarToServer(base64) {
+  if (!store.auth.token) return
+  try {
+    saving.value = true
+    const user = await updateProfile({ avatar: base64 })
+    // 更新 store 和 localStorage
+    if (store.auth.user) {
+      store.auth.user.avatar = user.avatar
+      store.auth.user.display_name = user.display_name
+    }
+    uni.setStorageSync('user_avatar', base64)
+    uni.showToast({ title: '头像已同步保存', icon: 'success' })
+  } catch (e) {
+    console.error('头像同步失败:', e)
+    uni.showToast({ title: '头像已保存到本地，同步失败', icon: 'none' })
+  } finally {
+    saving.value = false
+  }
 }
 
 // 打开自定义弹窗
@@ -138,7 +172,7 @@ function closeNicknameModal() {
 }
 
 // 保存昵称
-function saveNickname() {
+async function saveNickname() {
   const newName = tempNickname.value.trim()
   if (!newName) {
     return uni.showToast({ title: '昵称不能为空', icon: 'none' })
@@ -149,7 +183,25 @@ function saveNickname() {
   
   customNickname.value = newName
   uni.setStorageSync('custom_nickname', newName)
-  if (store.auth.user) store.auth.user.display_name = newName
+  
+  // 同步到后端
+  if (store.auth.token) {
+    try {
+      saving.value = true
+      const user = await updateProfile({ display_name: newName })
+      if (store.auth.user) {
+        store.auth.user.display_name = user.display_name
+        store.auth.user.avatar = user.avatar
+      }
+    } catch (e) {
+      console.error('昵称同步失败:', e)
+      uni.showToast({ title: '昵称已保存本地，同步失败', icon: 'none' })
+    } finally {
+      saving.value = false
+    }
+  } else if (store.auth.user) {
+    store.auth.user.display_name = newName
+  }
   
   closeNicknameModal()
   uni.showToast({ title: '修改成功', icon: 'success' })

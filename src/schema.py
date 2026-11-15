@@ -386,6 +386,11 @@ MIGRATIONS: list[Migration] = [
         PRAGMA foreign_keys = ON;
         """,
     ),
+    Migration(
+        version=7,
+        name="user_avatar",
+        sql="ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT NULL;",
+    ),
 ]
 
 

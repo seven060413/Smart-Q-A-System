@@ -46,9 +46,9 @@ import { store } from '../../store.js'
 
 const loggedIn = computed(() => !!(store.auth.user && store.auth.token))
 
-// 本地缓存变量
-const customAvatar = ref('')
-const customNickname = ref('')
+// 优先使用后端返回的 avatar/display_name，fallback 到本地缓存
+const customAvatar = ref((store.auth.user && store.auth.user.avatar) || uni.getStorageSync('user_avatar') || '')
+const customNickname = ref((store.auth.user && store.auth.user.display_name) || uni.getStorageSync('custom_nickname') || '')
 
 // 实时读取本地最新昵称
 const displayName = computed(() => {

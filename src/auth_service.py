@@ -23,7 +23,7 @@ from .settings import auth_token_ttl_days
 
 # 对外可见的用户字段，绝不包含 password_hash / status。
 _PUBLIC_USER_SQL = (
-    "id, username, display_name, role, created_at, last_login_at"
+    "id, username, display_name, role, avatar, created_at, last_login_at"
 )
 
 
@@ -33,6 +33,7 @@ def _public_user(row) -> dict:
         "username": row["username"],
         "display_name": row["display_name"],
         "role": row["role"],
+        "avatar": row["avatar"] if "avatar" in row.keys() else "",
         "created_at": row["created_at"],
         "last_login_at": row["last_login_at"],
     }
@@ -209,4 +210,31 @@ def revoke_session(conn, session_id: str) -> None:
 
 def public_user_from_session_row(row) -> dict:
     """把 fetch_session_by_token_hash 的行转成公开用户字段。"""
+    return _public_user(row)
+
+
+def update_profile(conn, user_id: str, display_name: str | None = None, avatar: str | None = None) -> dict:
+    """更新用户的展示名和头像（base64 data URI 或 URL）。"""
+    parts = []
+    values = []
+    if display_name is not None:
+        parts.append("display_name = ?")
+        values.append(display_name)
+    if avatar is not None:
+        parts.append("avatar = ?")
+        values.append(avatar)
+    if not parts:
+        raise ApiError(400, "NO_UPDATE", "没有需要更新的字段")
+    values.append(user_id)
+    with conn:
+        conn.execute(
+            f"UPDATE users SET {', '.join(parts)}, updated_at = ? WHERE id = ?",
+            [now_utc()] + values,
+        )
+    row = conn.execute(
+        f"SELECT {_PUBLIC_USER_SQL} FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
     return _public_user(row)

@@ -364,6 +364,20 @@ export function logoutUser() {
 }
 
 /**
+ * 更新个人资料（昵称、头像）
+ * @param {Object} payload - { display_name?, avatar? }
+ * @returns {Promise<{ id, username, display_name, role, avatar, created_at, last_login_at }>}
+ */
+export function updateProfile(payload) {
+  return request('/api/auth/profile', {
+    method: 'PUT',
+    data: payload,
+    auth: true,
+    timeout: 15000,
+  })
+}
+
+/**
  * 智能答案校验：使用 LLM 判断学生答案是否正确
  * @param {Object} payload - { question, user_answer, correct_answer, question_type }
  * @returns {Promise<{is_correct: boolean, confidence: number, feedback: string}>}

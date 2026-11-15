@@ -3,12 +3,12 @@
 
 
 
-export const BASE_URL = 'http://localhost:18080'
+export const BASE_URL = 'https://seventeen17.com.cn'
 
 
 
 
-//测试时改成这个http://127.0.0.1:18080 / http://114.55.116.162:18080
+//测试时改成这个http://127.0.0.1:18080 / http://114.55.116.162:18080 /https://seventeen17.com.cn
 // 实际部署时按环境改成你的地址（不要照抄示例，按真实环境填写）：
 // 1) 手机 / 局域网调试：http://<电脑局域网IPv4>:18080（手机与电脑同一 Wi-Fi）
 // 2) 正式部署：https://<你的后端域名>（H5 麦克风要求 HTTPS 或 localhost）
