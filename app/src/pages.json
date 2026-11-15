@@ -3,9 +3,8 @@
 		{
 			"path": "pages/index/index",
 			"style": {
-				"navigationBarTitleText": "数学知识问答",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "数学知识问答"
 			}
 		},
 		{
@@ -71,7 +70,7 @@
 	"tabBar": {
 		"color": "#8a8f99",
 		"selectedColor": "#2b6cb0",
-		"backgroundColor": "#ffffff",
+		"backgroundColor": "#f5f6f8",
 		"borderStyle": "black",
 		"list": [
 			{

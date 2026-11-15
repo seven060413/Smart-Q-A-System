@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from . import chat_service, speech
+from .attachment_api import router as attachment_router
 from .auth_api import router as auth_router
 from .auth_deps import AuthContext, get_db, get_optional_auth_context
 from .chat_api import router as chat_router
@@ -30,6 +31,7 @@ app = FastAPI(title="中小学教材知识图谱智能问答系统")
 # 统一错误结构 + X-Request-ID；认证/聊天历史路由在下面注册。
 install_error_handlers(app)
 app.include_router(auth_router)
+app.include_router(attachment_router)
 app.include_router(chat_router)
 app.include_router(video_router)
 
@@ -368,3 +370,176 @@ def transcribe(file: UploadFile = File(...)):
         raise ApiError(exc.status_code, exc.code, exc.message) from None
 
     return {"text": text}
+
+
+# ===== 知识点详情 =====
+@app.get("/api/knowledge/{node_id}", summary="获取知识点详情")
+def get_knowledge_detail(
+    node_id: str,
+    ctx: AuthContext | None = Depends(get_optional_auth_context),
+):
+    """返回知识点的定义、例子、关联练习和前后置关系。"""
+    # 在已加载的图谱中查找节点
+    node = None
+    for n in kp_nodes:
+        if n.id == node_id:
+            node = n
+            break
+    
+    if node is None:
+        raise ApiError(404, "NODE_NOT_FOUND", "知识点不存在")
+    
+    props = node.properties or {}
+    
+    # 获取关联的练习（通过 edges 查找）
+    related_exercises = []
+    from .loader import load_edges
+    edges = load_edges(OUT_PATH if match_scope == "book_5b" else RAW_PATH)
+    
+    for e in edges:
+        if e.target == node_id and e.type == "tests_concept":
+            # 找到测试该概念的练习
+            for ex in kp_nodes:
+                if ex.id == e.source and ex.label == "Exercise":
+                    ex_props = ex.properties or {}
+                    related_exercises.append({
+                        "id": ex.id,
+                        "name": ex.name,
+                        "stem": ex_props.get("stem", ex.name),
+                        "answer": ex_props.get("answer", ""),
+                        "difficulty": ex_props.get("difficulty", 1),
+                        "analysis": ex_props.get("analysis", ""),
+                    })
+        elif e.source == node_id and e.type == "tests_skill":
+            for ex in kp_nodes:
+                if ex.id == e.target and ex.label == "Exercise":
+                    ex_props = ex.properties or {}
+                    related_exercises.append({
+                        "id": ex.id,
+                        "name": ex.name,
+                        "stem": ex_props.get("stem", ex.name),
+                        "answer": ex_props.get("answer", ""),
+                        "difficulty": ex_props.get("difficulty", 1),
+                        "analysis": ex_props.get("analysis", ""),
+                    })
+    
+    # 获取前置和后续知识点
+    prerequisites = []
+    successors = []
+    for e in edges:
+        if e.target == node_id and e.type == "prerequisites_for":
+            for pn in kp_nodes:
+                if pn.id == e.source:
+                    prerequisites.append({"id": pn.id, "name": pn.name, "label": pn.label})
+        elif e.source == node_id and e.type == "prerequisites_for":
+            for sn in kp_nodes:
+                if sn.id == e.target:
+                    successors.append({"id": sn.id, "name": sn.name, "label": sn.label})
+    
+    return {
+        "id": node.id,
+        "label": node.label,
+        "name": node.name,
+        "definition": props.get("definition") or props.get("description", ""),
+        "importance": props.get("importance", ""),
+        "pages": props.get("pages", ""),
+        "examples": props.get("examples", []),
+        "exercises": related_exercises[:5],  # 最多返回5道练习
+        "prerequisites": prerequisites,
+        "successors": successors,
+    }
+
+
+# ==================== 智能答案校验 API ====================
+
+
+class CheckAnswerRequest(BaseModel):
+    """答案校验请求"""
+    question: str = Field(..., description="题目内容")
+    user_answer: str = Field(..., description="学生答案")
+    correct_answer: str = Field(..., description="参考答案")
+    question_type: str = Field(default="fill", description="题目类型: choice/fill")
+
+
+@app.post("/api/check-answer")
+def check_answer(req: CheckAnswerRequest):
+    """使用 LLM 智能校验学生答案是否正确。
+
+    返回结构::
+
+        {
+            "is_correct": true/false,
+            "confidence": 0.0-1.0,
+            "feedback": "反馈信息",
+            "suggestion": "改进建议（可选）"
+        }
+    """
+    # 构建校验 prompt
+    prompt = f"""你是一个专业的数学老师，负责批改学生的作业答案。
+
+【题目】{req.question}
+
+【参考答案】{req.correct_answer}
+
+【学生答案】{req.user_answer}
+
+请判断学生的答案是否正确。注意：
+1. 如果学生答案的核心意思与参考答案一致，应该判为正确
+2. 对于数学计算题，只要最终数值正确，即使过程简略也应判对
+3. 对于填空题，学生答案包含关键信息即可
+4. 不要过于严格，要考虑学生的表达方式可能不同
+
+请严格按以下 JSON 格式返回（不要包含其他内容）：
+{{"is_correct": true/false, "confidence": 0.0-1.0的数值, "feedback": "简短的反馈信息"}}"""
+
+    try:
+        raw_response = generator.generate(prompt)
+        # 尝试解析 JSON 响应
+        import json
+        import re
+
+        # 提取 JSON 部分（处理可能的 markdown 代码块）
+        json_match = re.search(r'\{[^{}]*"is_correct"[^{}]*\}', raw_response)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            # 如果无法解析，使用简单的包含判断作为后备
+            user_clean = req.user_answer.strip().lower()
+            correct_clean = req.correct_answer.strip().lower()
+            is_correct = bool(user_clean and correct_clean and (
+                user_clean in correct_clean or
+                correct_clean in user_clean or
+                user_clean.replace(" ", "") in correct_clean.replace(" ", "")
+            ))
+            result = {
+                "is_correct": is_correct,
+                "confidence": 0.7 if is_correct else 0.3,
+                "feedback": "答案基本正确" if is_correct else "答案不准确，请再想想"
+            }
+
+        return {
+            "success": True,
+            "data": {
+                "is_correct": result.get("is_correct", False),
+                "confidence": result.get("confidence", 0.5),
+                "feedback": result.get("feedback", "已批改")
+            }
+        }
+
+    except Exception as exc:
+        logger.exception("answer check failed: %s", exc)
+        # 后备方案：简单字符串匹配
+        user_clean = req.user_answer.strip().lower()
+        correct_clean = req.correct_answer.strip().lower()
+        is_correct = bool(
+            user_clean and correct_clean and
+            (user_clean in correct_clean or correct_clean in user_clean)
+        )
+        return {
+            "success": True,
+            "data": {
+                "is_correct": is_correct,
+                "confidence": 0.6,
+                "feedback": "答案" + ("正确" if is_correct else "不准确")
+            }
+        }

@@ -209,6 +209,18 @@ def message_to_dict(
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    if "attachment_id" in row.keys() and row["attachment_id"]:
+        payload["attachment"] = {
+            "id": row["attachment_id"],
+            "name": row["attachment_name"],
+            "media_type": row["attachment_media_type"],
+            "byte_size": row["attachment_byte_size"],
+            "ocr_text": row["attachment_ocr_text"] or "",
+            "ocr_status": row["attachment_ocr_status"],
+            "ocr_confidence": row["attachment_ocr_confidence"],
+            "question_text": row["attachment_question_text"] or row["content"] or "",
+            "content_url": f"/api/attachments/{row['attachment_id']}/content",
+        }
     return _enrich_message_knowledge_points(payload, knowledge_points)
 
 
@@ -352,16 +364,20 @@ def list_messages(
     ):
         raise ApiError(400, "INVALID_CURSOR", "分页游标无效")
     sql = (
-        "SELECT rowid AS seq, id, role, content, status, refused, "
-        "       knowledge_point, source, learning_path_json, "
-        "       prerequisite_gaps_json, reply_to_message_id, error_code, "
-        "       error_message, graph_version_id, context_graph_version_id, "
-        "       created_at, updated_at "
-        "FROM messages WHERE conversation_id = ?"
+        "SELECT m.rowid AS seq, m.id, m.role, m.content, m.status, m.refused, "
+        "       m.knowledge_point, m.source, m.learning_path_json, "
+        "       m.prerequisite_gaps_json, m.reply_to_message_id, m.error_code, "
+        "       m.error_message, m.graph_version_id, m.context_graph_version_id, "
+        "       m.created_at, m.updated_at, a.id AS attachment_id, a.original_name AS attachment_name, "
+        "       a.media_type AS attachment_media_type, a.byte_size AS attachment_byte_size, "
+        "       a.ocr_text AS attachment_ocr_text, a.ocr_status AS attachment_ocr_status, "
+        "       a.ocr_confidence AS attachment_ocr_confidence, a.question_text AS attachment_question_text "
+        "FROM messages AS m LEFT JOIN attachments AS a ON a.user_message_id = m.id AND a.deleted_at IS NULL "
+        "WHERE m.conversation_id = ?"
     )
     params: list = [conversation_id]
     if payload:
-        sql += " AND (created_at < ? OR (created_at = ? AND rowid < ?))"
+        sql += " AND (m.created_at < ? OR (m.created_at = ? AND m.rowid < ?))"
         params.extend(
             [
                 payload.get("created_at"),
@@ -369,7 +385,7 @@ def list_messages(
                 payload.get("seq"),
             ]
         )
-    sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+    sql += " ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?"
     params.append(limit + 1)
 
     rows = conn.execute(sql, params).fetchall()

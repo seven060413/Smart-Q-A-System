@@ -8,12 +8,12 @@
       @select-menu="onSelectMenu"
     />
 
-    <!-- 登录状态栏 -->
-    <view class="topbar">
+    <!-- 自定义导航栏 -->
+    <view class="topbar" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="topbar-left">
         <!-- 汉堡菜单按钮 -->
         <text class="menu-btn" @click="showSidebar = true" aria-label="打开菜单">☰</text>
-        <text class="topbar-state">{{ authStateText }}</text>
+        <text class="topbar-title">数学知识问答</text>
       </view>
       
       <view class="topbar-actions">
@@ -41,11 +41,35 @@
       <!-- 消息列表 -->
       <view v-for="(msg, i) in messages" :key="i" :id="'msg-' + i" class="msg-row">
         <view v-if="msg.role === 'user'" class="msg msg-user">
-          <view class="bubble bubble-user">{{ msg.text }}</view>
+          <view class="msg-content">
+            <view v-if="msg.attachment" class="question-card">
+              <view class="question-card-head"><text>{{ msg.attachment.mediaType === 'application/pdf' ? 'PDF 题目' : '题目图片' }}</text><text class="question-status">{{ msg.attachment.statusText }}</text></view>
+              <text v-if="msg.attachment.errorText" class="question-error">{{ msg.attachment.errorText }}</text>
+              <button v-if="msg.attachment.statusText === '解答失败'" class="question-retry" :disabled="attachmentBusy" @click="solveMessageAttachment(msg)">重试解答</button>
+              <button v-if="msg.attachment.statusText === '上传失败'" class="question-retry" :disabled="attachmentBusy" @click="retryAttachmentUpload(msg)">重新上传</button>
+              <text v-if="typeof msg.attachment.ocr_confidence === 'number' && msg.attachment.ocr_confidence < 0.7" class="ocr-warning">⚠ 识别结果可能有误，请检查数字、分数和运算符</text>
+              <image v-if="msg.attachment.filePath && msg.attachment.mediaType !== 'application/pdf'" :src="msg.attachment.filePath" mode="widthFix" class="question-image" @click="previewMessageAttachment(msg)" />
+              <view class="question-file">{{ msg.attachment.name }} · {{ formatBytes(msg.attachment.size) }}<text v-if="msg.attachment.pageCount"> · {{ msg.attachment.pageCount }} 页</text></view>
+              <button v-if="msg.attachment.id" class="question-preview" @click="previewMessageAttachment(msg)">{{ msg.attachment.mediaType === 'application/pdf' ? '打开 PDF 文件' : '查看原图' }}</button>
+              <view v-if="msg.attachment.failedPages && msg.attachment.failedPages.length" class="question-error">第 {{ msg.attachment.failedPages.join('、') }} 页识别失败，已保留其他页面结果</view>
+              <text class="question-label">识别出的题目</text>
+              <textarea v-model="msg.attachment.ocrText" class="question-text" maxlength="20000" placeholder="等待识别或请输入题目" />
+              <view class="question-actions">
+                <button v-if="msg.attachment.id" :disabled="attachmentBusy" @click="recognizeMessageAttachment(msg)">重新识别</button>
+                <button :disabled="attachmentBusy || !msg.attachment.id || !msg.attachment.ocrText.trim()" @click="solveMessageAttachment(msg)">{{ attachmentBusy ? '正在处理…' : '确认题目并生成解答' }}</button>
+              </view>
+            </view>
+            <view v-else class="bubble bubble-user">{{ msg.text }}</view>
+          </view>
+          <image v-if="userAvatar" :src="userAvatar" class="message-avatar" mode="aspectFill" />
+          <view v-else class="message-avatar avatar-fallback" aria-label="用户头像"></view>
         </view>
 
         <view v-else class="msg msg-ai">
-          <view class="bubble bubble-ai">
+          <image src="/static/math-assistant.svg" class="message-avatar" mode="aspectFill" />
+          <view class="msg-content">
+            <view class="assistant-name">数学助教</view>
+            <view class="bubble bubble-ai">
             <view v-if="msg.failed" class="failed-card">
               <view class="failed-title">⚠️ 回答生成失败</view>
               <view class="failed-text">{{ msg.error_message || '请稍后重新提问' }}</view>
@@ -58,9 +82,17 @@
             </view>
 
             <template v-else>
-              <view class="head">
+              <view class="answer-summary">
+                <text class="summary-label">{{ msg.knowledge_confidence < 0.35 ? '知识点未可靠匹配' : '知识点匹配' }}</text>
+                <view class="head">
                 <text class="chip">{{ msg.knowledge_point }}</text>
+                <text v-if="msg.knowledge_confidence !== undefined" class="confidence">匹配 {{ Math.round(msg.knowledge_confidence * 100) }}%</text>
                 <text class="source">📚 {{ msg.source }}</text>
+                </view>
+              </view>
+              <view v-if="msg.knowledge_candidates && msg.knowledge_candidates.length" class="candidate-list">
+                <text class="candidate-label">请选择更符合的知识点</text>
+                <button v-for="candidate in msg.knowledge_candidates" :key="candidate.id" class="candidate-item candidate-button" :disabled="attachmentBusy" @click.stop="solveWithCandidate(msg, candidate)">{{ candidate.name }} · {{ Math.round(candidate.confidence * 100) }}%</button>
               </view>
 
               <!-- 三层折叠：前置知识 -->
@@ -132,14 +164,18 @@
                 </view>
               </view>
 
-              <!-- 三层折叠：本体讲解 -->
-              <view class="section" @click="toggle(msg, 'body')">
+              <!-- 解题过程 -->
+              <view class="section answer-section" @click="toggle(msg, 'body')">
                 <view class="section-head">
-                  <text>💡 本体讲解</text>
+                  <text>🧩 解题过程</text>
                   <text class="arrow">{{ msg.open.body ? '▾' : '▸' }}</text>
                 </view>
                 <view v-if="msg.open.body" class="section-body">
-                  <text class="answer">{{ msg.answer }}</text>
+                  <view v-for="(step, stepIndex) in answerStepList(msg)" :key="stepIndex" class="solution-step">
+                    <view class="solution-step-head"><text class="solution-step-no">{{ stepIndex + 1 }}</text><text class="solution-step-title">{{ step.title || `第 ${stepIndex + 1} 步` }}</text></view>
+                    <text class="solution-step-content">{{ step.content }}</text>
+                  </view>
+                  <view v-if="msg.final_answer || finalAnswer(msg.answer)" class="final-answer"><text class="final-label">最终答案</text><text class="final-text">{{ msg.final_answer || finalAnswer(msg.answer) }}</text></view>
                 </view>
               </view>
 
@@ -147,11 +183,12 @@
               <view class="section" @click="toggle(msg, 'cons')">
                 <view class="section-head">
                   <text>✏️ 巩固练习</text>
+                  <text class="section-count">{{ exerciseCount(msg) ? `有 ${exerciseCount(msg)} 道巩固练习` : '暂无巩固练习' }}</text>
                   <text class="arrow">{{ msg.open.cons ? '▾' : '▸' }}</text>
                 </view>
                 <view v-if="msg.open.cons" class="section-body">
-                  <template v-if="msg.learning_path.exercises.length">
-                    <view v-for="(ex, j) in msg.learning_path.exercises" :key="j" class="exercise">
+                  <template v-if="exerciseCount(msg)">
+                    <view v-for="(ex, j) in (msg.exercises && msg.exercises.length ? msg.exercises : msg.learning_path.exercises)" :key="j" class="exercise">
                       <text class="exercise-no">第 {{ j + 1 }} 题</text>
                       <text class="exercise-text">{{ ex }}</text>
                     </view>
@@ -168,6 +205,7 @@
 
               <button class="path-btn" @click="goPath(msg)">🗺 查看学习路径</button>
             </template>
+            </view>
           </view>
         </view>
       </view>
@@ -194,13 +232,31 @@
         <text v-else-if="voiceSupported && recordStarting" class="record-text subtle">正在准备…</text>
       </view>
 
+      <view v-if="attachment.filePath && !attachmentMessage" class="attachment-draft">
+        <view v-if="attachment.mediaType === 'application/pdf'" class="attachment-thumb attachment-pdf">PDF</view>
+        <image v-else :src="attachment.filePath" mode="aspectFill" class="attachment-thumb" @click="previewDraftAttachment" />
+        <view class="attachment-draft-meta">
+          <text class="attachment-name">{{ attachment.name }}</text>
+          <text class="attachment-size">{{ formatBytes(attachment.size) }} · {{ attachment.statusText }}</text>
+        </view>
+        <button class="attachment-remove" :disabled="attachmentBusy" aria-label="删除图片" @click="clearAttachment">×</button>
+      </view>
+      <view v-if="attachment.id" class="attachment-text-editor">
+        <textarea v-model="attachment.ocrText" maxlength="20000" placeholder="请核对或修改识别出的题目" @input="syncOcrText" />
+        <view class="attachment-actions">
+          <button :disabled="attachmentBusy" @click="recognizeAttachment">重新识别</button>
+          <button :disabled="attachmentBusy || !attachment.ocrText.trim()" @click="solveAttachment">提交题目</button>
+        </view>
+      </view>
       <view class="input-bar">
-        <input
+        <textarea
           class="input"
           v-model="question"
           placeholder="输入你的问题…"
-          confirm-type="send"
           :disabled="loading || recordStarting || recordState !== 'idle'"
+          :auto-height="true"
+          :maxlength="-1"
+          confirm-type="send"
           @confirm="send"
         />
         <button
@@ -227,10 +283,36 @@
           <text class="sr-only">语音输入</text>
         </button>
         <button
+          class="plus-btn"
+          :disabled="loading || attachmentBusy || recordStarting || recordState !== 'idle'"
+          aria-label="添加图片题目"
+          @click="toggleAttachmentMenu"
+        >＋</button>
+        <button
           class="send-btn"
-          :disabled="loading || !question || recordStarting || recordState !== 'idle'"
+          :disabled="loading || attachmentBusy || (!question && (!attachment.filePath || attachment.id)) || recordStarting || recordState !== 'idle'"
           @click="send"
         >发送</button>
+      </view>
+      <view v-if="attachment.menuOpen" class="attachment-menu">
+        <view class="attachment-menu-item" @click="chooseAttachment('album')">
+          <view class="attachment-menu-icon">
+            <text class="ami-icon">🖼️</text>
+          </view>
+          <text class="ami-label">相册</text>
+        </view>
+        <view class="attachment-menu-item" @click="chooseAttachment('camera')">
+          <view class="attachment-menu-icon">
+            <text class="ami-icon">📷</text>
+          </view>
+          <text class="ami-label">拍照</text>
+        </view>
+        <view class="attachment-menu-item" @click="choosePdf">
+          <view class="attachment-menu-icon">
+            <text class="ami-icon">📄</text>
+          </view>
+          <text class="ami-label">文件</text>
+        </view>
       </view>
     </view>
 
@@ -241,21 +323,85 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
-import { askQuestion, listMessages, listVideos, transcribeAudio } from '../../api.js'
+import { askQuestion, attachmentAction, attachmentContent, attachmentStatus, deleteAttachment, listMessages, listVideos, transcribeAudio, uploadAttachment } from '../../api.js'
 import AppTabBar from '../../components/AppTabBar.vue'
 import Sidebar from './Sidebar.vue' 
 import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
+import { BASE_URL } from '../../config.js'
 import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
 
 // 侧边栏控制状态
 const showSidebar = ref(false)
 const currentMenu = ref('study')
 
+// 状态栏高度（自定义导航栏适配）
+const statusBarHeight = ref(0)
+// #ifdef H5
+statusBarHeight.value = 0
+// #endif
+// #ifdef APP-PLUS
+try {
+  const sysInfo = uni.getSystemInfoSync()
+  statusBarHeight.value = (sysInfo && sysInfo.statusBarHeight) || 0
+} catch (e) {
+  statusBarHeight.value = 0
+}
+// #endif
+
 // 用于实时显示最新的本地缓存昵称
 const currentNickname = ref('')
+const userAvatar = ref('')
+const attachmentMessage = ref(null)
+const previewingAttachment = ref(false)
 
 // 处理侧边栏点击菜单事件
+function loadUserAvatar() {
+  userAvatar.value = uni.getStorageSync('user_avatar') || ''
+}
+
+function exerciseCount(msg) {
+  if (Array.isArray(msg && msg.exercises) && msg.exercises.length) return msg.exercises.length
+  return Array.isArray(msg && msg.learning_path && msg.learning_path.exercises)
+    ? msg.learning_path.exercises.length
+    : 0
+}
+
+function answerStepList(msg) {
+  if (Array.isArray(msg && msg.solution_steps) && msg.solution_steps.length) return msg.solution_steps
+  const text = String((msg && msg.answer) || '')
+  const trimmed = text.trim()
+  // 兼容后端返回的 JSON 字符串可能被括号包裹，如 ({"steps":[...],"final_answer":"..."})
+  const jsonStr = (trimmed.startsWith('(') && trimmed.endsWith(')')) ? trimmed.slice(1, -1) : trimmed
+  if (jsonStr.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(jsonStr)
+      if (Array.isArray(parsed.steps)) return parsed.steps.map((step, index) => ({
+        title: typeof step === 'object' ? (step.title || `第 ${index + 1} 步`) : `第 ${index + 1} 步`,
+        content: typeof step === 'object' ? (step.content || '') : String(step),
+      })).filter((step) => step.content)
+    } catch (e) {}
+  }
+  const clean = text.replace(/(?:最终答案|答案)\s*[:：].*$/is, '').trim()
+  return clean.split(/\n+/).map((line, index) => ({ title: `第 ${index + 1} 步`, content: line.replace(/^\s*\d+[.、)）]\s*/, '') })).filter((step) => step.content)
+}
+
+function finalAnswer(answer) {
+  // 先尝试从纯文本中正则匹配
+  const textMatch = String(answer || '').match(/(?:最终答案|答案)\s*[:：]\s*(.+)$/is)
+  if (textMatch) return textMatch[1].trim()
+  // 再尝试从 JSON 结构中提取 final_answer 字段（兼容后端返回的括号包裹格式）
+  const trimmed = String(answer || '').trim()
+  const jsonStr = (trimmed.startsWith('(') && trimmed.endsWith(')')) ? trimmed.slice(1, -1) : trimmed
+  if (jsonStr.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(jsonStr)
+      if (parsed.final_answer) return parsed.final_answer
+    } catch (e) {}
+  }
+  return ''
+}
+
 function onSelectMenu(menu) {
   currentMenu.value = menu.key
   showSidebar.value = false
@@ -271,6 +417,10 @@ function onSelectMenu(menu) {
 
 const question = ref('')
 const loading = ref(false)
+const attachmentBusy = ref(false)
+const attachment = reactive({
+  filePath: '', file: null, name: '', size: 0, id: '', ocrText: '', statusText: '', menuOpen: false, mediaType: '', pageCount: 0, failedPages: [],
+})
 const historyLoading = ref(false)
 const loadingEarlier = ref(false)
 const messages = reactive([])
@@ -902,6 +1052,10 @@ if (recorder) {
   })
 }
 
+onShow(() => {
+  loadUserAvatar()
+})
+
 onHide(() => {
   // #ifdef H5
   if (recordState.value !== 'idle' || pendingStart) invalidateRecordSession()
@@ -935,6 +1089,7 @@ function goHistory() {
 function clearConversationView() {
   messages.splice(0, messages.length)
   question.value = ''
+  clearAttachment()
   store.currentConversationId = ''
   messagesCursor.value = ''
   hasEarlier.value = false
@@ -963,6 +1118,8 @@ function normalizeLearningPath(payload) {
     exercises = Array.isArray(payload && payload.exercises) ? payload.exercises : []
   }
   return {
+    steps: Array.isArray(lp.steps) ? lp.steps : (Array.isArray(payload && payload.solution_steps) ? payload.solution_steps : []),
+    final_answer: lp.final_answer || payload.final_answer || '',
     prerequisites: Array.isArray(lp.prerequisites) ? lp.prerequisites : [],
     prerequisite_ids: Array.isArray(lp.prerequisite_ids) ? lp.prerequisite_ids : [],
     body: lp.body || '',
@@ -979,12 +1136,39 @@ function toUiMessages(items) {
   for (const m of items) {
     if (m.role === 'user') {
       lastUser = m.content || ''
-      out.push({ role: 'user', text: lastUser })
+      const item = { role: 'user', text: lastUser }
+      const attachment = m.attachment
+      if (attachment) {
+        const mediaType = attachment.media_type || ''
+        item.attachment = {
+          id: attachment.id,
+          name: attachment.name || attachment.original_name,
+          size: attachment.byte_size || 0,
+          mediaType,
+          pageCount: attachment.page_count || 0,
+          failedPages: attachment.failed_pages || [],
+          errorCode: attachment.error_code || '',
+          ocrText: attachment.question_text || attachment.ocr_text || lastUser,
+          statusText: attachment.ocr_status === 'completed' ? '识别完成，请核对题目' : (attachment.ocr_status || '处理中'),
+          ocr_confidence: attachment.ocr_confidence,
+          filePath: '',
+        }
+        if (mediaType !== 'application/pdf') {
+          attachmentContent(attachment.id).then((url) => { item.attachment.filePath = url }).catch((error) => {
+            item.attachment.statusText = '附件加载失败'
+            item.attachment.errorText = (error && error.message) || '无法加载附件文件'
+          })
+        }
+      }
+      out.push(item)
     } else if (m.role === 'assistant') {
       out.push({
         role: 'ai',
         id: m.id || '',
         answer: m.content || '',
+        final_answer: (m.learning_path && m.learning_path.final_answer) || '',
+        steps: (m.learning_path && m.learning_path.steps) || m.content || '',
+        exercises: m.exercises || (m.learning_path && m.learning_path.exercises) || [],
         knowledge_point: m.knowledge_point || '',
         prerequisite_gaps: m.prerequisite_gaps || [],
         learning_path: normalizeLearningPath(m),
@@ -1131,9 +1315,322 @@ function scrollBottom() {
   }, 50)
 }
 
+function formatBytes(size) {
+  if (!size) return '大小未知'
+  return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function previewDraftAttachment() {
+  if (!attachment.filePath) return
+  if (attachment.mediaType === 'application/pdf') {
+    uni.showToast({ title: '请先上传 PDF，再从消息中打开原文件', icon: 'none' })
+    return
+  }
+  // #ifdef H5
+  if (typeof window !== 'undefined') window.open(attachment.filePath, '_blank', 'noopener')
+  // #endif
+  // #ifndef H5
+  uni.previewImage({ current: attachment.filePath, urls: [attachment.filePath] })
+  // #endif
+}
+
+async function previewMessageAttachment(msg) {
+  if (!msg || !msg.attachment || previewingAttachment.value) return
+  const item = msg.attachment
+  // Open the tab during the user gesture so H5 browsers do not block it.
+  // #ifdef H5
+  const pdfWindow = item.mediaType === 'application/pdf' && typeof window !== 'undefined' ? window.open('', '_blank') : null
+  // #endif
+  previewingAttachment.value = true
+  try {
+    if (!item.filePath && item.id) item.filePath = await attachmentContent(item.id)
+    if (!item.filePath) throw new Error('无法加载附件文件')
+    if (item.mediaType === 'application/pdf') {
+      await openAttachmentFile(item.id, item.filePath, item.name, item.mediaType, pdfWindow)
+    } else {
+      // #ifdef H5
+      if (typeof window !== 'undefined') window.open(item.filePath, '_blank', 'noopener')
+      // #endif
+      // #ifndef H5
+      uni.previewImage({ current: item.filePath, urls: [item.filePath] })
+      // #endif
+    }
+  } catch (error) {
+    // #ifdef H5
+    if (pdfWindow && !pdfWindow.closed) pdfWindow.close()
+    // #endif
+    uni.showToast({ title: (error && error.message) || '附件打开失败', icon: 'none' })
+  } finally {
+    previewingAttachment.value = false
+  }
+}
+
+async function openAttachmentFile(attachmentId, url, name, mediaType, pdfWindow = null) {
+  // #ifdef H5
+  if (url && typeof window !== 'undefined') {
+    if (pdfWindow && !pdfWindow.closed) pdfWindow.location.href = url
+    else window.open(url, '_blank', 'noopener')
+    return
+  }
+  // #endif
+  // #ifdef APP-PLUS
+  const token = store.auth.token || ''
+  const response = await new Promise((resolve, reject) => uni.request({
+    url: `${BASE_URL}/api/attachments/${encodeURIComponent(attachmentId)}/content`,
+    method: 'GET',
+    responseType: 'arraybuffer',
+    header: { Authorization: `Bearer ${token}` },
+    success: (res) => res.statusCode >= 200 && res.statusCode < 300 ? resolve(res.data) : reject(new Error('PDF 下载失败')),
+    fail: () => reject(new Error('PDF 下载失败')),
+  }))
+  const filename = `${Date.now()}-${String(name || 'document.pdf').replace(/[^\\w.-]/g, '_')}`
+  const entry = await new Promise((resolve, reject) => plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (fs) => fs.root.getFile(filename, { create: true }, resolve, reject), reject))
+  await new Promise((resolve, reject) => entry.createWriter((writer) => {
+    writer.onwrite = resolve
+    writer.onerror = () => reject(new Error('PDF 保存失败'))
+    writer.write(new Blob([response], { type: mediaType || 'application/pdf' }))
+  }, reject))
+  plus.runtime.openFile(entry.toLocalURL(), {}, () => uni.showToast({ title: '当前设备没有可用的 PDF 阅读器', icon: 'none' }))
+  // #endif
+  // #ifndef H5
+  // #ifndef APP-PLUS
+  uni.showToast({ title: '当前平台暂不支持打开 PDF', icon: 'none' })
+  // #endif
+  // #endif
+}
+
+function clearAttachment() {
+  if (attachment.id) deleteAttachment(attachment.id).catch(() => {})
+  Object.assign(attachment, { filePath: '', file: null, name: '', size: 0, id: '', ocrText: '', statusText: '', menuOpen: false, mediaType: '', pageCount: 0, failedPages: [] })
+  attachmentMessage.value = null
+}
+
+function choosePdf() {
+  attachment.menuOpen = false
+  // #ifdef H5
+  if (typeof document !== 'undefined') {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/pdf,.pdf'
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      if (!file) return
+      setPdfDraft(file.name || 'document.pdf', file, file.name || 'document.pdf', file.size || 0)
+    }
+    input.click()
+    return
+  }
+  // #endif
+  if (typeof uni.chooseFile === 'function') {
+    uni.chooseFile({ count: 1, type: 'file', extension: ['pdf'], success: (res) => {
+      const file = res.tempFiles && res.tempFiles[0]
+      const path = (res.tempFilePaths && res.tempFilePaths[0]) || (file && file.path)
+      if (file && path) setPdfDraft(path, null, file.name || '题目.pdf', file.size || 0)
+    }, fail: () => uni.showToast({ title: '未选择 PDF 文件', icon: 'none' }) })
+  } else {
+    uni.showToast({ title: '当前平台暂不支持选择 PDF 文件', icon: 'none' })
+  }
+}
+
+function setPdfDraft(filePath, file, name, size) {
+  if (size > 20 * 1024 * 1024) {
+    uni.showToast({ title: 'PDF 文件不能超过 20 MB', icon: 'none' })
+    return
+  }
+  const draft = { filePath: String(filePath || name || 'document.pdf'), file: typeof File !== 'undefined' && file instanceof File ? file : null, name, size, id: '', ocrText: '', statusText: '待发送', mediaType: 'application/pdf', pageCount: 0, failedPages: [] }
+  Object.assign(attachment, draft)
+  const message = { role: 'user', text: '', attachment: { ...draft } }
+  messages.push(message)
+  attachmentMessage.value = message
+  scrollBottom()
+}
+
+function toggleAttachmentMenu() {
+  if (!store.auth.user) {
+    uni.showToast({ title: '登录后才能上传题目图片', icon: 'none' })
+    return
+  }
+  attachment.menuOpen = !attachment.menuOpen
+}
+
+function chooseAttachment(sourceType) {
+  attachment.menuOpen = false
+  uni.chooseImage({ count: 1, sizeType: ['compressed'], sourceType: [sourceType], success: (res) => {
+    const path = res.tempFilePaths && res.tempFilePaths[0]
+    const file = res.tempFiles && res.tempFiles[0]
+    if (!path) return
+    const name = (file && file.name) || path.split('/').pop() || '题目图片'
+    const size = (file && file.size) || 0
+    const lower = name.toLowerCase()
+    if (lower && !/\.(jpe?g|png)$/.test(lower)) {
+      uni.showToast({ title: '仅支持 JPG 或 PNG 图片', icon: 'none' })
+      return
+    }
+    const draft = { filePath: path, file: file && typeof File !== 'undefined' && file instanceof File ? file : null, name, size, id: '', ocrText: '', statusText: '待发送' }
+    Object.assign(attachment, { ...draft, menuOpen: false })
+    const message = { role: 'user', text: '', attachment: { ...draft } }
+    messages.push(message)
+    attachmentMessage.value = message
+    scrollBottom()
+  }, fail: () => uni.showToast({ title: '未选择图片', icon: 'none' }) })
+}
+
+async function recognizeAttachment({ fromUpload = false } = {}) {
+  const target = attachmentMessage.value && attachmentMessage.value.attachment
+  if (!attachment.id || (attachmentBusy.value && !fromUpload)) return
+  attachmentBusy.value = true
+  attachment.statusText = '识别中'
+  try {
+    let data
+    if (attachment.mediaType === 'application/pdf') {
+      data = await attachmentStatus(attachment.id)
+      if (data.ocr_status === 'failed') {
+        data = await attachmentAction(attachment.id, 'recognize')
+      }
+      for (let attempt = 0; attempt < 45 && data.ocr_status === 'processing'; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        data = await attachmentStatus(attachment.id)
+      }
+    } else {
+      data = await attachmentAction(attachment.id, 'recognize')
+    }
+    attachment.ocrText = data.ocr_text || ''
+    attachment.pageCount = data.page_count || 0
+    attachment.failedPages = data.failed_pages || []
+    attachment.statusText = data.ocr_status === 'partial' ? '部分页面识别完成' : (data.ocr_status === 'failed' ? `识别失败${data.error_code ? `（${data.error_code}）` : ''}` : '识别完成，请核对题目')
+    if (target) Object.assign(target, { id: attachment.id, ocrText: attachment.ocrText, statusText: attachment.statusText, ocr_confidence: data.ocr_confidence, pageCount: attachment.pageCount, failedPages: attachment.failedPages, mediaType: attachment.mediaType, errorCode: data.error_code })
+    if (!attachment.ocrText) uni.showToast({ title: '未识别到题目文字，请手动输入', icon: 'none' })
+  } catch (e) {
+    attachment.statusText = '识别失败'
+    if (target) Object.assign(target, { statusText: attachment.statusText, errorText: (e && e.message) || '识别失败，请重试' })
+    uni.showToast({ title: (e && e.message) || '图片识别失败', icon: 'none' })
+  } finally { attachmentBusy.value = false }
+}
+
+async function recognizeMessageAttachment(msg) {
+  if (!msg || !msg.attachment) return
+  attachmentMessage.value = msg
+  Object.assign(attachment, msg.attachment)
+  await recognizeAttachment()
+}
+
+async function solveMessageAttachment(msg) {
+  if (!msg || !msg.attachment) return
+  attachmentMessage.value = msg
+  // 只同步 id 和状态，不覆盖用户可能在编辑区修改的 ocrText
+  attachment.id = msg.attachment.id
+  attachment.statusText = msg.attachment.statusText
+  attachment.mediaType = msg.attachment.mediaType
+  attachment.name = msg.attachment.name
+  attachment.size = msg.attachment.size
+  attachment.filePath = msg.attachment.filePath
+  attachment.pageCount = msg.attachment.pageCount || 0
+  attachment.failedPages = msg.attachment.failedPages || []
+  // 确保使用当前编辑区最新的 ocrText，而不是卡片中的旧值
+  if (!attachment.ocrText.trim() && msg.attachment.ocrText) {
+    attachment.ocrText = msg.attachment.ocrText
+  }
+  await solveAttachment()
+}
+
+/**
+ * 同步编辑区的 OCR 文本到消息卡片，确保两边数据一致
+ */
+function syncOcrText() {
+  if (attachmentMessage.value && attachmentMessage.value.attachment) {
+    attachmentMessage.value.attachment.ocrText = attachment.ocrText
+  }
+}
+
+async function solveWithCandidate(msg, candidate) {
+  if (!msg || !candidate || !msg.attachment || attachmentBusy.value) return
+  attachmentMessage.value = msg
+  // 只同步元数据，保留编辑区最新的 ocrText
+  attachment.id = msg.attachment.id
+  attachment.statusText = msg.attachment.statusText
+  if (!attachment.ocrText.trim() && msg.attachment.ocrText) {
+    attachment.ocrText = msg.attachment.ocrText
+  }
+  await solveAttachment(candidate.id)
+}
+
+async function solveAttachment(knowledgePointId = null) {
+  const text = (typeof attachment.ocrText === 'string') ? attachment.ocrText.trim() : String(attachment.ocrText || '').trim()
+  if (!attachment.id || !text || attachmentBusy.value) return
+  attachmentBusy.value = true
+  attachment.statusText = '知识点匹配与解答生成中'
+  // 构建请求体，只包含有效值（注意：knowledgePointId 可能是点击事件对象而非字符串）
+  const payload = { text }
+  if (store.currentConversationId) payload.conversation_id = store.currentConversationId
+  if (typeof knowledgePointId === 'string' && knowledgePointId) payload.knowledge_point_id = knowledgePointId
+  try {
+    const data = await attachmentAction(attachment.id, 'solve', payload)
+    if (attachmentMessage.value) attachmentMessage.value.attachment.ocrText = text
+    messages.push({ role: 'ai', id: data.assistant_message_id || '', answer: data.answer || data.coverage_note || '', solution_steps: data.solution_steps || [], final_answer: data.final_answer || '', exercises: data.exercises || [], knowledge_point: data.knowledge_point || '', knowledge_confidence: data.knowledge_confidence, knowledge_candidates: data.knowledge_candidates || [], prerequisite_gaps: data.prerequisite_gaps || [], learning_path: normalizeLearningPath(data), source: data.source || '', refused: !!data.refused, failed: false, retryQuestion: text, open: { pre: false, body: true, cons: false }, videosLoaded: false, videosLoading: false, videosError: false, videosNoIds: false })
+    attachment.statusText = '已完成'
+    if (attachmentMessage.value) attachmentMessage.value.attachment.statusText = attachment.statusText
+    clearAttachment()
+    scrollBottom()
+  } catch (e) {
+    // 详细打印 422 错误信息，便于定位后端验证失败原因
+    console.error('[solveAttachment] 请求失败:', {
+      status: e?.status,
+      code: e?.code,
+      message: e?.message,
+      details: e?.details,
+      attachmentId: attachment.id,
+      textLength: text?.length,
+      payload: JSON.stringify(payload),
+    })
+    attachment.statusText = '解答失败'
+    if (attachmentMessage.value) {
+      attachmentMessage.value.attachment.statusText = attachment.statusText
+      attachmentMessage.value.attachment.errorText = (e && e.message) || '解答失败，请重试'
+    }
+    uni.showToast({ title: (e && e.message) || '题目解答失败', icon: 'none' })
+  } finally { attachmentBusy.value = false }
+}
+
+async function retryAttachmentUpload(msg) {
+  if (!msg || !msg.attachment || attachmentBusy.value) return
+  attachmentMessage.value = msg
+  Object.assign(attachment, msg.attachment)
+  await sendAttachment()
+}
+
+async function sendAttachment() {
+  if (!attachment.filePath || attachmentBusy.value) return
+  if (!store.auth.user) { uni.showToast({ title: '登录后才能上传题目图片', icon: 'none' }); return }
+  attachmentBusy.value = true
+  attachment.statusText = '上传中'
+  try {
+    const data = await uploadAttachment(attachment.filePath, { file: attachment.file, conversationId: store.currentConversationId || null })
+    attachment.mediaType = data.media_type || attachment.mediaType
+    attachment.id = data.id
+    if (attachmentMessage.value) {
+      Object.assign(attachmentMessage.value.attachment, { id: data.id, statusText: '识别中' })
+    }
+    if (data.conversation_id) {
+      store.currentConversationId = data.conversation_id
+      uni.setStorageSync('last_conversation_id', data.conversation_id)
+    }
+    attachment.statusText = '识别中'
+    await recognizeAttachment({ fromUpload: true })
+  } catch (e) {
+    attachment.statusText = '上传失败'
+    if (attachmentMessage.value) {
+      attachmentMessage.value.attachment.statusText = attachment.statusText
+      attachmentMessage.value.attachment.errorText = `${(e && e.message) || '附件上传失败，请重试'}${e && e.code ? `（${e.code}）` : ''}`
+    }
+    uni.showToast({ title: `${(e && e.message) || '附件上传失败，请重试'}${e && e.code ? `（${e.code}）` : ''}`, icon: 'none' })
+    attachmentBusy.value = false
+  }
+}
+
 function send() {
+  if (attachment.filePath && !attachment.id) { sendAttachment(); return }
   const q = question.value.trim()
-  if (!q || loading.value || recordStarting.value || recordState.value !== 'idle') return
+  if (!q || loading.value || attachmentBusy.value || recordStarting.value || recordState.value !== 'idle') return
   messages.push({ role: 'user', text: q })
   question.value = ''
   loading.value = true
@@ -1312,14 +1809,13 @@ function goPath(msg) {
 }
 /* #endif */
 
-/* 优化后的顶部栏样式 */
+/* 自定义导航栏样式 */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 20rpx 32rpx; 
-  background: #ffffff;
-  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
+  background: #f5f6f8;
   position: relative;
   z-index: 10;
 }
@@ -1342,12 +1838,10 @@ function goPath(msg) {
   transform: scale(0.9); 
 }
 
-.topbar-state {
-  font-size: 24rpx;
-  color: #888;
-  background: #f4f5f7; 
-  padding: 4rpx 16rpx;
-  border-radius: 20rpx;
+.topbar-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #333;
 }
 
 .topbar-actions {
@@ -1406,13 +1900,17 @@ function goPath(msg) {
 }
 .msg {
   display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
-.msg-user {
-  justify-content: flex-end;
-}
-.msg-ai {
-  justify-content: flex-start;
-}
+.msg-user { justify-content: flex-end; }
+.msg-ai { justify-content: flex-start; }
+.msg-content { min-width: 0; max-width: calc(100% - 84rpx); }
+.message-avatar { flex: 0 0 64rpx; width: 64rpx; height: 64rpx; border-radius: 50%; background: #e7eef7; object-fit: cover; }
+.avatar-fallback { border: 8rpx solid #d9e4f2; box-sizing: border-box; }
+.assistant-name { margin: 2rpx 0 8rpx 4rpx; color: #5b6b7f; font-size: 22rpx; }
 
 .bubble {
   max-width: 86%;
@@ -1433,6 +1931,23 @@ function goPath(msg) {
   border-top-left-radius: 6rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 }
+.answer-summary { padding-bottom: 12rpx; border-bottom: 1rpx solid #eef2f6; }
+.summary-label { display: block; margin-bottom: 8rpx; color: #718096; font-size: 22rpx; font-weight: 600; }
+.final-answer { margin-top: 18rpx; padding: 18rpx; background: #edf8f2; border-left: 6rpx solid #2f9e68; border-radius: 8rpx; }
+.final-label, .final-text { display: block; }
+.final-label { color: #197247; font-size: 24rpx; font-weight: 700; }
+.final-text { margin-top: 6rpx; color: #145c3a; font-size: 30rpx; font-weight: 700; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.section-count { flex: 1; margin: 0 10rpx; color: #8793a2; font-size: 22rpx; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question-card { width: min(620rpx, 100%); padding: 18rpx; background: #f7f9fc; border: 1rpx solid #dce6f0; border-radius: 14rpx; box-sizing: border-box; }
+.question-card-head { display: flex; justify-content: space-between; gap: 12rpx; color: #2f4358; font-size: 26rpx; font-weight: 700; }
+.question-status { color: #66809a; font-size: 22rpx; font-weight: 400; }
+.ocr-warning { display: block; margin-top: 10rpx; padding: 10rpx 12rpx; color: #9a6412; background: #fff7e6; border-radius: 6rpx; font-size: 22rpx; line-height: 1.45; }
+.question-image { display: block; width: 100%; max-height: 520rpx; margin-top: 14rpx; border-radius: 8rpx; background: #e9eef5; }
+.question-file { margin-top: 8rpx; color: #8592a1; font-size: 21rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question-label { display: block; margin-top: 16rpx; color: #52657a; font-size: 23rpx; font-weight: 600; }
+.question-text { width: 100%; min-height: 110rpx; margin-top: 8rpx; padding: 14rpx; box-sizing: border-box; background: #fff; border: 1rpx solid #d7e0ea; border-radius: 8rpx; color: #263746; font-size: 26rpx; line-height: 1.55; }
+.question-actions { display: flex; gap: 10rpx; margin-top: 10rpx; }
+.question-actions button { flex: 1; min-width: 0; margin: 0; padding: 0 10rpx; color: #2f6fb3; background: #e6f0fb; border: 0; border-radius: 8rpx; font-size: 23rpx; line-height: 58rpx; }
 .typing {
   color: #999;
 }
@@ -1747,9 +2262,109 @@ function goPath(msg) {
   border: none;
 }
 
-.composer {
-  background: #fff;
+.attachment-draft {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 12rpx 24rpx;
+  background: #f5f6f8;
   border-top: 1rpx solid #eee;
+}
+.attachment-thumb {
+  flex: 0 0 88rpx;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 8rpx;
+  background: #f2f3f5;
+}
+.attachment-draft-meta {
+  min-width: 0;
+  flex: 1;
+}
+.attachment-name, .attachment-size {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-name { font-size: 26rpx; color: #333; }
+.attachment-size { margin-top: 6rpx; font-size: 22rpx; color: #777; }
+.attachment-remove, .plus-btn {
+  flex: 0 0 64rpx;
+  width: 64rpx;
+  height: 64rpx;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  line-height: 64rpx;
+  text-align: center;
+}
+.attachment-remove { color: #c53030; background: #fff5f5; font-size: 36rpx; }
+.attachment-text-editor { padding: 12rpx 24rpx; background: #f5f6f8; }
+.attachment-text-editor textarea { width: 100%; min-height: 120rpx; box-sizing: border-box; padding: 16rpx; background: #f7f8fa; border-radius: 8rpx; font-size: 26rpx; }
+.attachment-actions { display: flex; gap: 12rpx; margin-top: 10rpx; }
+.attachment-actions button { flex: 1; margin: 0; min-width: 0; font-size: 24rpx; line-height: 58rpx; color: #2b6cb0; background: #e8f0fb; border: none; border-radius: 8rpx; }
+.attachment-menu {
+  display: flex;
+  gap: 16rpx;
+  padding: 16rpx 24rpx 12rpx;
+  background: #f5f6f8;
+}
+.attachment-menu-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 16rpx 8rpx 12rpx;
+  background: #ffffff;
+  border-radius: 12rpx;
+  box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.attachment-menu-item:active {
+  transform: scale(0.96);
+  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.08);
+}
+.attachment-menu-icon {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  border-radius: 50%;
+}
+.ami-icon {
+  font-size: 32rpx;
+  line-height: 1;
+}
+.ami-label {
+  font-size: 22rpx;
+  color: #555;
+  white-space: nowrap;
+}
+.plus-btn { margin-right: 12rpx; color: #2b6cb0; background: #e8f0fb; font-size: 40rpx; }
+.confidence, .candidate-list { font-size: 22rpx; color: #666; }
+.candidate-list { padding: 8rpx 0; }
+.candidate-label, .candidate-item { display: block; }
+.candidate-label { color: #555; font-weight: 600; }
+.candidate-item { color: #777; margin-top: 4rpx; }
+.candidate-button { display: block; width: 100%; margin: 6rpx 0 0; padding: 0 12rpx; text-align: left; background: #f5f8fc; border: 1rpx solid #d9e4f0; border-radius: 8rpx; line-height: 52rpx; font-size: 23rpx; }
+.solution-list { display: flex; flex-direction: column; gap: 14rpx; }
+.solution-step { padding: 16rpx; background: #f7f9fc; border-left: 6rpx solid #2b6cb0; border-radius: 6rpx; }
+.solution-step-head { display: flex; align-items: center; gap: 12rpx; margin-bottom: 8rpx; }
+.solution-step-no { width: 36rpx; height: 36rpx; flex: 0 0 36rpx; border-radius: 50%; text-align: center; line-height: 36rpx; background: #2b6cb0; color: #fff; font-size: 22rpx; font-weight: 700; }
+.solution-step-title { font-size: 27rpx; line-height: 1.45; font-weight: 700; color: #243b53; }
+.solution-step-content { display: block; font-size: 28rpx; line-height: 1.85; color: #263238; white-space: pre-wrap; word-break: break-word; }
+.question-preview { display: block; width: 100%; margin: 8rpx 0; padding: 0 16rpx; color: #2867a8; background: #e8f0fb; border: 1rpx solid #c9d9ec; border-radius: 8rpx; font-size: 24rpx; line-height: 58rpx; text-align: center; }
+.question-image { max-width: 100%; max-height: 560rpx; object-fit: contain; cursor: zoom-in; }
+.question-error { display: block; margin-top: 8rpx; color: #b42318; font-size: 23rpx; line-height: 1.45; }
+.question-retry { margin: 8rpx 0 0; padding: 0 12rpx; color: #9a3412; background: #fff7ed; border: 1rpx solid #fed7aa; border-radius: 6rpx; font-size: 22rpx; line-height: 48rpx; }
+
+.composer {
+  background: #f5f6f8;
 }
 
 .record-row {
@@ -1775,18 +2390,21 @@ function goPath(msg) {
   display: flex;
   align-items: center;
   padding: 12rpx 24rpx;
-  background: #fff;
+  background: #f5f6f8;
 }
 .input {
   flex: 1;
   min-width: 0;
   height: 72rpx;
+  max-height: 240rpx;
   margin-right: 12rpx;
-  background: #f2f3f5;
-  border-radius: 36rpx;
-  padding: 0 28rpx;
+  background: #ffffff;
+  border-radius: 20rpx;
+  padding: 18rpx 28rpx;
   font-size: 28rpx;
   box-sizing: border-box;
+  line-height: 1.5;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.08);
 }
 .voice-btn {
   flex: 0 0 72rpx;

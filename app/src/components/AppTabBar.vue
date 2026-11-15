@@ -6,11 +6,10 @@
       fixed
       placeholder
       safe-area-inset-bottom
-      shape="round"
       :z-index="100"
       active-color="#2b6cb0"
       inactive-color="#8a8f99"
-      custom-style="left: 50%; right: auto; bottom: calc(8px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: calc(100% - 48px); max-width: 420px; margin-left: 0; margin-right: 0; border-radius: 28px; background: #ffffff; box-shadow: 0 6px 20px rgba(43, 108, 176, 0.14); --wot-tabbar-height: 56px; --wot-tabbar-item-icon-size: 26px; --wot-tabbar-item-title-font-size: 11px;"
+      custom-style="left: 0; right: 0; bottom: 0; transform: none; width: 100%; max-width: none; border-radius: 0; background: #f5f6f8; box-shadow: none; --wot-tabbar-height: 56px; --wot-tabbar-item-icon-size: 26px; --wot-tabbar-item-title-font-size: 11px;"
       @change="handleChange"
     >
       <wd-tabbar-item

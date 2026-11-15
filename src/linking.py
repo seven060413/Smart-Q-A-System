@@ -40,6 +40,15 @@ def _coverage(node_chars: set, question_chars: set) -> float:
 
 
 # 单字知识点允许的精确问法：只在这些明确问法下命中，避免「足球比赛」命中「比」。
+_GENERIC_UNIT_NAMES = {
+    "时", "小时", "分钟", "秒", "米", "千米", "厘米", "毫米", "元", "角", "分",
+}
+
+
+def _generic_unit_blocked(candidate: str, question: str) -> bool:
+    return candidate in _GENERIC_UNIT_NAMES and len(question.strip()) > 18
+
+
 _SINGLE_CHAR_PATTERNS = (
     "什么是{0}",
     "{0}是什么",
@@ -57,7 +66,7 @@ def _ascii_word_in(candidate: str, question: str) -> bool:
 
 def _candidate_allowed(candidate: str, question: str) -> bool:
     """是否允许该候选参与模糊打分。"""
-    if not candidate or len(candidate) < 2:
+    if not candidate or len(candidate) < 2 or _generic_unit_blocked(candidate, question):
         return False
     if candidate.isascii():
         return _ascii_word_in(candidate, question)
@@ -66,7 +75,7 @@ def _candidate_allowed(candidate: str, question: str) -> bool:
 
 def _candidate_exact(candidate: str, question: str) -> bool:
     """问句是否明确提到了完整候选名。"""
-    if not candidate:
+    if not candidate or _generic_unit_blocked(candidate, question):
         return False
     if candidate.isascii():
         return _ascii_word_in(candidate, question)

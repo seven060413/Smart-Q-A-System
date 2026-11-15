@@ -145,6 +145,111 @@ export function transcribeAudio(filePath, { file = null } = {}) {
  * - 登录用户传 auth=true，后端按令牌归属保存；
  * - clientRequestId 用于网络重试去重。
  */
+export function uploadAttachment(filePath, { file = null, conversationId = null } = {}) {
+  // H5 的 uni.uploadFile 仍会校验 filePath.indexOf，即使同时提供 file；
+  // 使用原生 FormData 可直接发送浏览器 File，避免把 File 对象误当路径。
+  if (file && typeof window !== 'undefined' && typeof FormData !== 'undefined' && typeof fetch === 'function') {
+    return new Promise(async (resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file, file.name || 'attachment')
+      if (conversationId) form.append('conversation_id', conversationId)
+      const headers = {}
+      const token = getStoredToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+      try {
+        const response = await fetch(`${BASE_URL}/api/attachments`, { method: 'POST', headers, body: form })
+        const body = await response.json().catch(() => null)
+        if (response.ok) {
+          resolve(body)
+          return
+        }
+        const error = body && body.error
+        reject(new ApiError((error && error.message) || `附件上传失败（HTTP ${response.status}）`, {
+          status: response.status,
+          code: (error && error.code) || 'HTTP_ERROR',
+          details: (error && error.details) || null,
+        }))
+      } catch (error) {
+        // 保留浏览器原始错误（Failed to fetch / net::ERR_* / CORS），否则无法区分失败原因
+        if (!(error instanceof ApiError)) console.error('attachment upload failed:', error)
+        reject(error instanceof ApiError ? error : new ApiError(
+          `附件上传失败，请检查网络${error && error.message ? `（${error.message}）` : ''}`,
+          { status: 0, code: 'NETWORK_ERROR' }
+        ))
+      }
+    })
+  }
+  return new Promise((resolve, reject) => {
+    const token = getStoredToken()
+    const formData = conversationId ? { conversation_id: conversationId } : {}
+    const options = {
+      url: `${BASE_URL}/api/attachments`,
+      name: 'file',
+      filePath: file ? (file.name || 'image') : filePath,
+      formData,
+      timeout: 30000,
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(typeof res.data === 'string' ? JSON.parse(res.data) : res.data) } catch (e) { reject(new ApiError('附件响应解析失败', { status: 0, code: 'PARSE_ERROR' })) }
+          return
+        }
+        reject(parseError(res))
+      },
+      fail: (err) => {
+        const detail = (err && err.errMsg) || ''
+        if (detail) console.error('attachment uploadFile failed:', detail)
+        reject(new ApiError(`图片上传失败，请检查网络${detail ? `（${detail}）` : ''}`, { status: 0, code: 'NETWORK_ERROR' }))
+      },
+    }
+    if (file) options.file = file
+    uni.uploadFile(options)
+  })
+}
+
+export function attachmentStatus(id) {
+  return request(`/api/attachments/${encodeURIComponent(id)}/status`, { auth: true, timeout: 15000 })
+}
+
+export function attachmentAction(id, action, data = null) {
+  return request(`/api/attachments/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST', data, auth: true, timeout: action === 'recognize' ? 60000 : 120000,
+  })
+}
+
+export function deleteAttachment(id) {
+  return request(`/api/attachments/${encodeURIComponent(id)}`, { method: 'DELETE', auth: true })
+}
+
+export function attachmentContent(id) {
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: `${BASE_URL}/api/attachments/${encodeURIComponent(id)}/content`,
+      method: 'GET',
+      responseType: 'arraybuffer',
+      header: { Authorization: `Bearer ${getStoredToken()}` },
+      success: (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) { reject(parseError(res)); return }
+        const contentType = (res.header && (res.header['content-type'] || res.header['Content-Type'])) || 'application/octet-stream'
+        try {
+          if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined') {
+            resolve(URL.createObjectURL(new Blob([res.data], { type: contentType })))
+            return
+          }
+          const bytes = new Uint8Array(res.data)
+          let binary = ''
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+          }
+          const base64 = typeof btoa === 'function' ? btoa(binary) : uni.arrayBufferToBase64(res.data)
+          resolve(`data:${contentType};base64,${base64}`)
+        } catch (e) { reject(new ApiError('附件加载失败', { status: 0, code: 'ATTACHMENT_LOAD_ERROR' })) }
+      },
+      fail: () => reject(new ApiError('附件加载失败', { status: 0, code: 'NETWORK_ERROR' })),
+    })
+  })
+}
+
 export function askQuestion(
   question,
   { conversationId = null, clientRequestId = null, auth = false } = {}
@@ -243,6 +348,33 @@ export function fetchMe() {
   return request('/api/auth/me', { auth: true, timeout: 15000 })
 }
 
+/**
+ * 获取知识点详情（定义、例子、关联练习等）
+ * @param {string} nodeId - 知识点ID（如 math_5b_rjb_cpt1）
+ */
+export function getKnowledgeDetail(nodeId) {
+  return request(`/api/knowledge/${encodeURIComponent(nodeId)}`, {
+    auth: false, // 知识点详情可公开访问
+    timeout: 10000,
+  })
+}
+
 export function logoutUser() {
   return request('/api/auth/logout', { method: 'POST', auth: true, timeout: 15000 })
 }
+
+/**
+ * 智能答案校验：使用 LLM 判断学生答案是否正确
+ * @param {Object} payload - { question, user_answer, correct_answer, question_type }
+ * @returns {Promise<{is_correct: boolean, confidence: number, feedback: string}>}
+ */
+export function checkAnswer(payload) {
+  return request('/api/check-answer', {
+    method: 'POST',
+    data: payload,
+    auth: false,
+    timeout: 30000, // LLM 调用可能较慢
+  })
+}
+
+

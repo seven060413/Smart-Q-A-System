@@ -299,6 +299,32 @@ ALTER TABLE video_candidates ADD COLUMN aid INTEGER;
 ALTER TABLE video_candidates ADD COLUMN cid INTEGER;
 """
 
+ATTACHMENTS_SCHEMA = """
+CREATE TABLE attachments (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    original_name   TEXT NOT NULL,
+    media_type      TEXT NOT NULL CHECK (media_type IN ('image/jpeg', 'image/png')),
+    byte_size       INTEGER NOT NULL CHECK (byte_size > 0),
+    width           INTEGER NOT NULL CHECK (width > 0),
+    height          INTEGER NOT NULL CHECK (height > 0),
+    storage_name    TEXT NOT NULL UNIQUE,
+    ocr_status      TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (ocr_status IN ('pending', 'processing', 'completed', 'failed')),
+    ocr_text        TEXT,
+    ocr_confidence  REAL,
+    question_text   TEXT,
+    solution_json   TEXT,
+    solved_at       TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    deleted_at      TEXT
+);
+CREATE INDEX ix_attachments_user ON attachments(user_id, created_at);
+CREATE INDEX ix_attachments_conversation ON attachments(conversation_id, created_at);
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(version=1, name="initial_schema", sql=INITIAL_SCHEMA),
     Migration(
@@ -310,6 +336,55 @@ MIGRATIONS: list[Migration] = [
         version=3,
         name="video_embed_metadata",
         sql=VIDEO_EMBED_METADATA_SCHEMA,
+    ),
+    Migration(version=4, name="attachments", sql=ATTACHMENTS_SCHEMA),
+    Migration(
+        version=5,
+        name="attachment_message_link",
+        sql="ALTER TABLE attachments ADD COLUMN user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL;",
+    ),
+    Migration(
+        version=6,
+        name="pdf_attachment_processing",
+        sql="""
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE attachments_v6 (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+            original_name TEXT NOT NULL,
+            media_type TEXT NOT NULL CHECK (media_type IN ('image/jpeg', 'image/png', 'application/pdf')),
+            byte_size INTEGER NOT NULL CHECK (byte_size > 0),
+            width INTEGER NOT NULL CHECK (width > 0),
+            height INTEGER NOT NULL CHECK (height > 0),
+            storage_name TEXT NOT NULL UNIQUE,
+            ocr_status TEXT NOT NULL DEFAULT 'pending' CHECK (ocr_status IN ('pending', 'processing', 'completed', 'partial', 'failed')),
+            ocr_text TEXT,
+            ocr_confidence REAL,
+            question_text TEXT,
+            solution_json TEXT,
+            solved_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+            page_count INTEGER,
+            page_results_json TEXT,
+            failed_pages_json TEXT NOT NULL DEFAULT '[]',
+            error_code TEXT
+        );
+        INSERT INTO attachments_v6
+        SELECT id, user_id, conversation_id, original_name, media_type, byte_size, width, height,
+               storage_name, ocr_status, ocr_text, ocr_confidence, question_text, solution_json,
+               solved_at, created_at, updated_at, deleted_at, user_message_id,
+               NULL, NULL, '[]', NULL
+        FROM attachments;
+        DROP TABLE attachments;
+        ALTER TABLE attachments_v6 RENAME TO attachments;
+        CREATE INDEX ix_attachments_user ON attachments(user_id, created_at);
+        CREATE INDEX ix_attachments_conversation ON attachments(conversation_id, created_at);
+        PRAGMA foreign_keys = ON;
+        """,
     ),
 ]
 
