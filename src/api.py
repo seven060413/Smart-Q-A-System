@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+import os  # 👈 用于创建静态目录
 
 from fastapi import Depends, FastAPI, File, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # 👈 用于放行生成的语音文件
 from pydantic import BaseModel, Field, field_validator
 
 from . import chat_service, speech
@@ -23,10 +25,78 @@ from .pipeline import run_qa, split_generated_answer
 from .settings import qa_match_scope
 from .subgraph import OUT_PATH, RAW_PATH
 from .video_api import router as video_router
+from .tts_api import router as tts_router  # 👈 引入 TTS 路由
 
 logger = logging.getLogger("ikgr.chat")
 
 app = FastAPI(title="中小学教材知识图谱智能问答系统")
+
+def patch_database():
+    """自动扫描并修复数据库：补全缺失的表和字段"""
+    import glob
+    db_files = glob.glob("**/*.db", recursive=True)
+    for db in db_files:
+        try:
+            conn = sqlite3.connect(db)
+            cursor = conn.cursor()
+            
+            # 1. 修复 users 表缺列 (avatar)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if cursor.fetchone():
+                cursor.execute("PRAGMA table_info(users)")
+                cols = [row[1] for row in cursor.fetchall()]
+                if 'avatar' not in cols:
+                    cursor.execute("ALTER TABLE users ADD COLUMN avatar TEXT")
+                    print(f"✅ 自动修复：已为 {db} 的 users 表补充 avatar 列")
+
+            # 2. 创建缺失的 attachments 表（用于存图片/PDF）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS attachments (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    conversation_id TEXT,
+                    message_id TEXT,
+                    user_message_id TEXT,
+                    assistant_message_id TEXT,
+                    original_name TEXT,
+                    media_type TEXT,
+                    byte_size INTEGER,
+                    ocr_status TEXT,
+                    ocr_text TEXT,
+                    question_text TEXT,
+                    error_code TEXT,
+                    page_count INTEGER,
+                    failed_pages TEXT,
+                    ocr_confidence REAL,
+                    file_path TEXT,
+                    created_at TEXT
+                )
+            """)
+
+            # 3. 如果 attachments 表已经存在，检查并补全缺失的列
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='attachments'")
+            if cursor.fetchone():
+                cursor.execute("PRAGMA table_info(attachments)")
+                att_cols = [row[1] for row in cursor.fetchall()]
+                
+                if 'user_message_id' not in att_cols:
+                    cursor.execute("ALTER TABLE attachments ADD COLUMN user_message_id TEXT")
+                    print(f"✅ 自动修复：已为 {db} 的 attachments 表补充 user_message_id 列")
+                    
+                if 'assistant_message_id' not in att_cols:
+                    cursor.execute("ALTER TABLE attachments ADD COLUMN assistant_message_id TEXT")
+                    print(f"✅ 自动修复：已为 {db} 的 attachments 表补充 assistant_message_id 列")
+
+            conn.commit()
+            conn.close()
+            print(f"✅ 数据库 {db} 检查/修复完毕")
+        except Exception as e:
+            print(f"自动修复数据库失败 {db}: {e}")
+
+# 👈 确保 static 目录存在，防止 StaticFiles 挂载报错
+os.makedirs("static", exist_ok=True)
+# 挂载静态文件目录，让前端能通过 URL 访问到生成的 MP3
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 统一错误结构 + X-Request-ID；认证/聊天历史路由在下面注册。
 install_error_handlers(app)
@@ -34,10 +104,9 @@ app.include_router(auth_router)
 app.include_router(attachment_router)
 app.include_router(chat_router)
 app.include_router(video_router)
+app.include_router(tts_router)  # 👈 注册 TTS 路由
 
 # CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域。
-# 阶段 2.5（HTTPS/反向代理）会把这里收紧为白名单；当前保持现状以兼容旧前端。
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,11 +117,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def no_store_api(request: Request, call_next):
-    """API 响应禁止浏览器/代理缓存。
-
-    /api/ask、历史消息和视频审核结果都会随数据库变化；缓存旧响应会导致
-    前端看到过期的空视频列表或缺少 node_key 的旧消息。
-    """
+    """API 响应禁止浏览器/代理缓存。"""
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
@@ -121,11 +186,7 @@ def _fill_answer(result: dict) -> None:
 
 
 def _body_graph_version_id(versions: dict) -> str | None:
-    """记录实际参与匹配的图谱版本。
-
-    full 模式用 subject_full 版本；book_5b 模式沿用五下 book 版本。
-    没有 full 版本时回退到 book 版本。
-    """
+    """记录实际参与匹配的图谱版本。"""
     if qa_match_scope() == "book_5b":
         return versions.get("book_version_id")
     return versions.get("full_version_id") or versions.get("book_version_id")
@@ -175,12 +236,7 @@ def ask(
     auth_ctx: AuthContext | None = Depends(get_optional_auth_context),
     conn=Depends(get_db),
 ):
-    """问答。
-
-    - 游客：只回答，不写数据库；带 conversation_id 返回 401。
-    - 登录：可自动创建会话，保存问题/回答/知识点/图谱版本；重复
-      client_request_id 返回已保存结果，避免重试产生重复消息。
-    """
+    """问答。"""
     # 1) 游客路径：完全不落库
     if auth_ctx is None:
         if req.conversation_id:
@@ -311,11 +367,8 @@ def ask(
 
 
 # ===== 语音转文字 =====
-# 只负责把短音频变成文本，不参与检索/问答流水线，也不落盘音频。
-
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 首版 5MB 上限
 
-# 可接受格式：按文件头魔数识别，不信任客户端 Content-Type / 文件名
 _AUDIO_FORMATS = {
     "mp3": ("audio/mpeg", "audio.mp3"),
     "wav": ("audio/wav", "audio.wav"),
@@ -347,12 +400,7 @@ def _detect_audio_format(head: bytes) -> str | None:
 
 @app.post("/api/transcribe")
 def transcribe(file: UploadFile = File(...)):
-    """语音转文字。
-
-    - 只接受常见短音频格式且 ≤ 5MB，校验失败/空文件/超限返回 4xx；
-    - 读取到内存后调用 ASR 适配层，不写临时文件，识别完即丢弃；
-    - 错误统一走 ApiError，不把密钥或供应商内部信息返回客户端。
-    """
+    """语音转文字。"""
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "AUDIO_TOO_LARGE", "音频文件过大，请控制在 5MB 以内")
@@ -379,7 +427,6 @@ def get_knowledge_detail(
     ctx: AuthContext | None = Depends(get_optional_auth_context),
 ):
     """返回知识点的定义、例子、关联练习和前后置关系。"""
-    # 在已加载的图谱中查找节点
     node = None
     for n in kp_nodes:
         if n.id == node_id:
@@ -391,14 +438,12 @@ def get_knowledge_detail(
     
     props = node.properties or {}
     
-    # 获取关联的练习（通过 edges 查找）
     related_exercises = []
     from .loader import load_edges
     edges = load_edges(OUT_PATH if match_scope == "book_5b" else RAW_PATH)
     
     for e in edges:
         if e.target == node_id and e.type == "tests_concept":
-            # 找到测试该概念的练习
             for ex in kp_nodes:
                 if ex.id == e.source and ex.label == "Exercise":
                     ex_props = ex.properties or {}
@@ -423,7 +468,6 @@ def get_knowledge_detail(
                         "analysis": ex_props.get("analysis", ""),
                     })
     
-    # 获取前置和后续知识点
     prerequisites = []
     successors = []
     for e in edges:
@@ -444,15 +488,13 @@ def get_knowledge_detail(
         "importance": props.get("importance", ""),
         "pages": props.get("pages", ""),
         "examples": props.get("examples", []),
-        "exercises": related_exercises[:5],  # 最多返回5道练习
+        "exercises": related_exercises[:5],
         "prerequisites": prerequisites,
         "successors": successors,
     }
 
 
 # ==================== 智能答案校验 API ====================
-
-
 class CheckAnswerRequest(BaseModel):
     """答案校验请求"""
     question: str = Field(..., description="题目内容")
@@ -463,18 +505,7 @@ class CheckAnswerRequest(BaseModel):
 
 @app.post("/api/check-answer")
 def check_answer(req: CheckAnswerRequest):
-    """使用 LLM 智能校验学生答案是否正确。
-
-    返回结构::
-
-        {
-            "is_correct": true/false,
-            "confidence": 0.0-1.0,
-            "feedback": "反馈信息",
-            "suggestion": "改进建议（可选）"
-        }
-    """
-    # 构建校验 prompt
+    """使用 LLM 智能校验学生答案是否正确。"""
     prompt = f"""你是一个专业的数学老师，负责批改学生的作业答案。
 
 【题目】{req.question}
@@ -494,16 +525,13 @@ def check_answer(req: CheckAnswerRequest):
 
     try:
         raw_response = generator.generate(prompt)
-        # 尝试解析 JSON 响应
         import json
         import re
 
-        # 提取 JSON 部分（处理可能的 markdown 代码块）
         json_match = re.search(r'\{[^{}]*"is_correct"[^{}]*\}', raw_response)
         if json_match:
             result = json.loads(json_match.group())
         else:
-            # 如果无法解析，使用简单的包含判断作为后备
             user_clean = req.user_answer.strip().lower()
             correct_clean = req.correct_answer.strip().lower()
             is_correct = bool(user_clean and correct_clean and (
@@ -528,7 +556,6 @@ def check_answer(req: CheckAnswerRequest):
 
     except Exception as exc:
         logger.exception("answer check failed: %s", exc)
-        # 后备方案：简单字符串匹配
         user_clean = req.user_answer.strip().lower()
         correct_clean = req.correct_answer.strip().lower()
         is_correct = bool(
