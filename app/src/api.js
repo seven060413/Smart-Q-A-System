@@ -66,9 +66,12 @@ function request(path, { method = 'GET', data = null, auth = false, timeout = 15
         }
         reject(parseError(res))
       },
-      fail: () => {
+      // 👇 修改了这里：接收 err 参数，打印详细原因，并带入提示中
+      fail: (err) => {
+        console.error(`[网络请求失败] 路径: ${path}`, err)
+        const errMsg = (err && err.errMsg) || '未知错误'
         reject(
-          new ApiError('网络连接失败，请检查网络或后端服务地址', {
+          new ApiError(`网络连接失败（${errMsg}），请检查后端服务地址`, {
             status: 0,
             code: 'NETWORK_ERROR',
           })
@@ -390,5 +393,3 @@ export function checkAnswer(payload) {
     timeout: 30000, // LLM 调用可能较慢
   })
 }
-
-

@@ -17,6 +17,13 @@
       </view>
       
       <view class="topbar-actions">
+        <view
+            class="sound-toggle"
+            :class="{ 'sound-off': !autoPlayEnabled }"
+            @click="toggleAutoPlay"
+          >
+            <text>{{ autoPlayEnabled ? '🔊 声音：开' : '🔇 声音：关' }}</text>
+          </view>
         <text v-if="store.auth.user" class="topbar-link" @click="newConversation">新对话</text>
         <!-- 历史链接跳转到历史页面 -->
         <text v-if="store.auth.user" class="topbar-link" @click="goHistory">历史</text>
@@ -39,7 +46,12 @@
       </view>
 
       <!-- 消息列表 -->
-      <view v-for="(msg, i) in messages" :key="i" :id="'msg-' + i" class="msg-row">
+      <view
+        v-for="(msg, i) in messages"
+        :key="msg.id || i"
+        :id="msg.id ? 'message-' + msg.id : 'msg-' + i"
+        class="msg-row"
+      >
         <view v-if="msg.role === 'user'" class="msg msg-user">
           <view class="msg-content">
             <view v-if="msg.attachment" class="question-card">
@@ -168,16 +180,46 @@
               <view class="section answer-section" @click="toggle(msg, 'body')">
                 <view class="section-head">
                   <text>🧩 解题过程</text>
-                  <text class="arrow">{{ msg.open.body ? '▾' : '▸' }}</text>
+
+                  <view class="section-head-right">
+                    <button
+                      class="tts-btn"
+                      :class="{ 'tts-playing': playingIndex === i }"
+                      @click.stop="playTTS(getSpeechText(msg), i)"
+                    >
+                      {{ playingIndex === i ? '⏹ 停止朗读' : '🔊 朗读答案' }}
+                    </button>
+
+                    <text class="arrow">{{ msg.open.body ? '▾' : '▸' }}</text>
+                  </view>
                 </view>
+
                 <view v-if="msg.open.body" class="section-body">
-                  <view v-for="(step, stepIndex) in answerStepList(msg)" :key="stepIndex" class="solution-step">
-                    <view class="solution-step-head"><text class="solution-step-no">{{ stepIndex + 1 }}</text><text class="solution-step-title">{{ step.title || `第 ${stepIndex + 1} 步` }}</text></view>
+                  <view
+                    v-for="(step, stepIndex) in answerStepList(msg)"
+                    :key="stepIndex"
+                    class="solution-step"
+                  >
+                    <view class="solution-step-head">
+                      <text class="solution-step-no">{{ stepIndex + 1 }}</text>
+                      <text class="solution-step-title">
+                        {{ step.title || `第 ${stepIndex + 1} 步` }}
+                      </text>
+                    </view>
                     <text class="solution-step-content">{{ step.content }}</text>
                   </view>
-                  <view v-if="msg.final_answer || finalAnswer(msg.answer)" class="final-answer"><text class="final-label">最终答案</text><text class="final-text">{{ msg.final_answer || finalAnswer(msg.answer) }}</text></view>
-                </view>
-              </view>
+
+    <view
+      v-if="msg.final_answer || finalAnswer(msg.answer)"
+      class="final-answer"
+    >
+      <text class="final-label">最终答案</text>
+      <text class="final-text">
+        {{ msg.final_answer || finalAnswer(msg.answer) }}
+      </text>
+    </view>
+  </view>
+</view>
 
               <!-- 三层折叠：巩固练习 -->
               <view class="section" @click="toggle(msg, 'cons')">
@@ -203,7 +245,7 @@
                 </view>
               </view>
 
-              <button class="path-btn" @click="goPath(msg)">🗺 查看学习路径</button>
+                <button class="path-btn" @click="goPath(msg)">🗺 查看学习路径</button>
             </template>
             </view>
           </view>
@@ -321,7 +363,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch,nextTick } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
 import { askQuestion, attachmentAction, attachmentContent, attachmentStatus, deleteAttachment, listMessages, listVideos, transcribeAudio, uploadAttachment } from '../../api.js'
 import AppTabBar from '../../components/AppTabBar.vue'
@@ -330,6 +372,237 @@ import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
 import { BASE_URL } from '../../config.js'
 import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
+// 全局自动朗读开关，默认开启
+const autoPlayEnabled = ref(true)
+
+// 切换声音开关
+function toggleAutoPlay() {
+  autoPlayEnabled.value = !autoPlayEnabled.value
+
+  // 关闭声音时，立即停止当前朗读
+  if (!autoPlayEnabled.value) {
+    stopTTS()
+  }
+
+  uni.showToast({
+    title: autoPlayEnabled.value ? '自动朗读已开启' : '自动朗读已关闭',
+    icon: 'none'
+  })
+}
+// ==================== TTS 文字转语音 ====================
+
+
+// 当前正在朗读的消息下标，-1 表示没有播放
+const playingIndex = ref(-1)
+
+// 音频播放器
+let ttsAudioContext = null
+
+// 请求序号：防止连续点击时，旧请求返回后又开始播放
+let ttsRequestToken = 0
+
+/**
+ * 从 AI 消息中提取适合朗读的文字
+ * 优先读取解题步骤和最终答案，避免直接朗读 JSON
+ */
+function getSpeechText(msg) {
+  if (!msg || msg.failed || msg.refused) return ''
+
+  const steps = Array.isArray(msg.solution_steps) && msg.solution_steps.length
+    ? msg.solution_steps
+    : (msg.learning_path && Array.isArray(msg.learning_path.steps) && msg.learning_path.steps.length
+        ? msg.learning_path.steps
+        : answerStepList(msg))
+
+  const stepTexts = steps
+    .map((step) => {
+      if (typeof step === 'string') return step.trim()
+      if (!step || typeof step !== 'object') return ''
+      return [step.title, step.content].filter(Boolean).join('，').trim()
+    })
+    .filter(Boolean)
+
+  const answer = msg.final_answer ||
+    (msg.learning_path && msg.learning_path.final_answer) ||
+    finalAnswer(msg.answer)
+
+  const parts = []
+
+  if (stepTexts.length) {
+    parts.push('解题过程。')
+    stepTexts.forEach((text, index) => {
+      parts.push(`第${index + 1}步，${text}`)
+    })
+  }
+
+  if (answer) {
+    parts.push(`最终答案：${answer}`)
+  }
+
+  // 如果没有步骤和最终答案，则回退到原始回答文本
+  if (!parts.length) {
+    let raw = String(msg.answer || '').trim()
+    const trimmed = raw.startsWith('(') && raw.endsWith(')')
+      ? raw.slice(1, -1)
+      : raw
+
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        raw = [
+          ...(Array.isArray(parsed.steps)
+            ? parsed.steps.map((item) => typeof item === 'string' ? item : item.content || '')
+            : []),
+          parsed.final_answer || '',
+        ].filter(Boolean).join('。')
+      } catch (e) {}
+    }
+
+    parts.push(raw)
+  }
+
+  return parts.join('。').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * 创建音频播放器
+ */
+function initTtsAudioContext() {
+  if (ttsAudioContext) return ttsAudioContext
+
+  if (typeof uni.createInnerAudioContext !== 'function') {
+    throw new Error('当前平台不支持音频播放')
+  }
+
+  const context = uni.createInnerAudioContext()
+
+  context.onEnded(() => {
+    playingIndex.value = -1
+  })
+
+  context.onError((error) => {
+    playingIndex.value = -1
+    console.error('[TTS] 音频播放失败：', error)
+    uni.showToast({ title: '语音播放失败，请重试', icon: 'none' })
+  })
+
+  ttsAudioContext = context
+  return context
+}
+
+/**
+ * 停止当前朗读
+ * destroy 为 true 时同时销毁播放器
+ */
+function stopTTS(destroy = false) {
+  // 让尚未返回的旧请求失效
+  ttsRequestToken += 1
+  playingIndex.value = -1
+
+  if (!ttsAudioContext) return
+
+  try {
+    ttsAudioContext.stop()
+  } catch (e) {}
+
+  if (destroy) {
+    try {
+      ttsAudioContext.destroy()
+    } catch (e) {}
+    ttsAudioContext = null
+  }
+}
+
+
+function cleanTTSContent(text) {
+  return String(text || '')
+    // 合并重复的步骤编号，例如：第1步，第 1 步 → 第1步
+    .replace(
+      /第\s*([一二三四五六七八九十\d]+)\s*步\s*[，,、]\s*第\s*\1\s*步/g,
+      '第$1步'
+    )
+    .trim()
+}
+
+/**
+ * 播放指定消息的语音
+ */
+ async function playTTS(text, index) {
+  const speechText = cleanTTSContent(text).trim()
+  console.log('实际发送给 TTS 的文本：', speechText)
+
+  if (!speechText) {
+    uni.showToast({ title: '没有可朗读的内容', icon: 'none' })
+    return
+  }
+
+  // 再次点击当前消息的朗读按钮：停止播放
+  if (playingIndex.value === index) {
+    stopTTS()
+    return
+  }
+
+  // 停止上一条消息的朗读
+  stopTTS()
+
+  const requestToken = ttsRequestToken
+  playingIndex.value = index
+
+  try {
+    const context = initTtsAudioContext()
+
+    // 请求后端创建流式 TTS 会话
+    const data = await new Promise((resolve, reject) => {
+      uni.request({
+        url: `${BASE_URL}/api/tts/stream/session`,
+        method: 'POST',
+        header: {
+          'Content-Type': 'application/json',
+        },
+        data: {
+          text: speechText,
+        },
+        success: (res) => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(res.data)
+          } else {
+            const message = res.data && (
+              res.data.detail || res.data.message
+            )
+            reject(new Error(message || `语音请求失败（${res.statusCode}）`))
+          }
+        },
+        fail: (error) => {
+          reject(new Error(error.errMsg || '无法连接语音服务'))
+        },
+      })
+    })
+
+    // 如果用户已经停止播放或切换了其他消息，不再继续
+    if (requestToken !== ttsRequestToken) return
+
+    if (!data || !data.audio_url) {
+      throw new Error('后端没有返回音频地址')
+    }
+
+    // 兼容后端返回完整 URL 或相对路径
+    const audioUrl = /^https?:\/\//i.test(data.audio_url)
+      ? data.audio_url
+      : `${BASE_URL.replace(/\/$/, '')}/${String(data.audio_url).replace(/^\//, '')}`
+
+    context.src = audioUrl
+    context.play()
+  } catch (error) {
+    if (requestToken !== ttsRequestToken) return
+
+    playingIndex.value = -1
+    console.error('[TTS] 朗读请求失败：', error)
+    uni.showToast({
+      title: (error && error.message) || '语音生成失败，请重试',
+      icon: 'none',
+    })
+  }
+}
 
 // 侧边栏控制状态
 const showSidebar = ref(false)
@@ -1057,6 +1330,9 @@ onShow(() => {
 })
 
 onHide(() => {
+  // 离开页面时停止语音
+  stopTTS()
+
   // #ifdef H5
   if (recordState.value !== 'idle' || pendingStart) invalidateRecordSession()
   // #endif
@@ -1066,6 +1342,7 @@ onHide(() => {
 })
 
 onUnload(() => {
+  stopTTS(true)
   invalidateRecordSession()
 })
 
@@ -1136,7 +1413,11 @@ function toUiMessages(items) {
   for (const m of items) {
     if (m.role === 'user') {
       lastUser = m.content || ''
-      const item = { role: 'user', text: lastUser }
+      const item = {
+          role: 'user',
+          id: m.id || '',
+          text: lastUser
+        }
       const attachment = m.attachment
       if (attachment) {
         const mediaType = attachment.media_type || ''
@@ -1188,43 +1469,100 @@ function toUiMessages(items) {
   return out
 }
 
-async function loadConversation(conversationId) {
+
+async function loadConversation(conversationId, targetMessageId = '') {
   if (!store.auth.user) {
     goAuth()
     return
   }
+
   historyLoading.value = true
+
   try {
     const page = await listMessages(conversationId, { limit: 50 })
+
     messages.splice(0, messages.length, ...toUiMessages(page.items))
+
     store.currentConversationId = conversationId
-    // 👇 新增：成功加载后，更新本地缓存
     uni.setStorageSync('last_conversation_id', conversationId)
-    
+
     messagesCursor.value = page.next_cursor || ''
     hasEarlier.value = !!page.has_more
 
-    const lastAi = [...messages].reverse().find((m) => m.role === 'ai' && m.learning_path)
+    const lastAi = [...messages].reverse().find(
+      (m) => m.role === 'ai' && m.learning_path
+    )
+
     if (lastAi) {
       store.learningPath = lastAi.learning_path
       store.knowledgePoint = lastAi.knowledge_point
       store.source = lastAi.source
     }
-    scrollBottom()
+
+    // 如果是从历史页面点击某道题进入，则定位到指定消息
+    if (targetMessageId) {
+      // 如果目标消息不在当前页面，继续加载更早的消息
+      while (
+        !messages.some(m => m.id === targetMessageId) &&
+        hasEarlier.value
+      ) {
+        const previousLength = messages.length
+
+        await loadEarlier()
+
+        // 防止分页没有返回新消息时无限循环
+        if (messages.length === previousLength) {
+          break
+        }
+      }
+
+      // 找到目标消息后，滚动到对应位置
+      const targetExists = messages.some(
+        m => m.id === targetMessageId
+      )
+
+      if (targetExists) {
+        scrollTo.value = ''
+        await nextTick()
+
+        scrollTo.value = 'message-' + targetMessageId
+        await nextTick()
+      } else {
+        uni.showToast({
+          title: '没有找到对应的问题',
+          icon: 'none'
+        })
+        scrollBottom()
+      }
+    } else {
+      // 普通打开历史会话，仍然滚动到底部
+      scrollBottom()
+    }
+
   } catch (e) {
     if (e && e.status === 401) {
-      uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+      uni.showToast({
+        title: '登录已过期，请重新登录',
+        icon: 'none'
+      })
       goAuth()
     } else if (e && e.status === 404) {
-      uni.showToast({ title: '会话不存在', icon: 'none' })
+      uni.showToast({
+        title: '会话不存在',
+        icon: 'none'
+      })
       newConversation()
     } else {
-      uni.showToast({ title: (e && e.message) || '加载历史失败', icon: 'none' })
+      uni.showToast({
+        title: (e && e.message) || '加载历史失败',
+        icon: 'none'
+      })
     }
   } finally {
     historyLoading.value = false
   }
 }
+
 
 async function loadEarlier() {
   if (!hasEarlier.value || loadingEarlier.value || !store.currentConversationId) return
@@ -1290,10 +1628,10 @@ onShow(() => {
   if (action) {
     store.pendingIndexAction = null
 
-    if (action.type === 'open' && action.conversationId) {
-      loadConversation(action.conversationId)
-      return
-    }
+   if (action.type === 'open' && action.conversationId) {
+  loadConversation(action.conversationId, action.messageId || '')
+  return
+}
     if (action.type === 'new') {
       if (loading.value || recordStarting.value || recordState.value !== 'idle') return
       clearConversationView()
@@ -1554,25 +1892,82 @@ async function solveWithCandidate(msg, candidate) {
   await solveAttachment(candidate.id)
 }
 
+
 async function solveAttachment(knowledgePointId = null) {
-  const text = (typeof attachment.ocrText === 'string') ? attachment.ocrText.trim() : String(attachment.ocrText || '').trim()
+  const text = (typeof attachment.ocrText === 'string')
+    ? attachment.ocrText.trim()
+    : String(attachment.ocrText || '').trim()
+
   if (!attachment.id || !text || attachmentBusy.value) return
+
   attachmentBusy.value = true
   attachment.statusText = '知识点匹配与解答生成中'
-  // 构建请求体，只包含有效值（注意：knowledgePointId 可能是点击事件对象而非字符串）
+
+  // 构建请求体
   const payload = { text }
-  if (store.currentConversationId) payload.conversation_id = store.currentConversationId
-  if (typeof knowledgePointId === 'string' && knowledgePointId) payload.knowledge_point_id = knowledgePointId
+
+  if (store.currentConversationId) {
+    payload.conversation_id = store.currentConversationId
+  }
+
+  if (typeof knowledgePointId === 'string' && knowledgePointId) {
+    payload.knowledge_point_id = knowledgePointId
+  }
+
   try {
     const data = await attachmentAction(attachment.id, 'solve', payload)
-    if (attachmentMessage.value) attachmentMessage.value.attachment.ocrText = text
-    messages.push({ role: 'ai', id: data.assistant_message_id || '', answer: data.answer || data.coverage_note || '', solution_steps: data.solution_steps || [], final_answer: data.final_answer || '', exercises: data.exercises || [], knowledge_point: data.knowledge_point || '', knowledge_confidence: data.knowledge_confidence, knowledge_candidates: data.knowledge_candidates || [], prerequisite_gaps: data.prerequisite_gaps || [], learning_path: normalizeLearningPath(data), source: data.source || '', refused: !!data.refused, failed: false, retryQuestion: text, open: { pre: false, body: true, cons: false }, videosLoaded: false, videosLoading: false, videosError: false, videosNoIds: false })
+
+    if (attachmentMessage.value) {
+      attachmentMessage.value.attachment.ocrText = text
+    }
+
+    // 添加 AI 解答消息
+    messages.push({
+      role: 'ai',
+      id: data.assistant_message_id || '',
+      answer: data.answer || data.coverage_note || '',
+      solution_steps: data.solution_steps || [],
+      final_answer: data.final_answer || '',
+      exercises: data.exercises || [],
+      knowledge_point: data.knowledge_point || '',
+      knowledge_confidence: data.knowledge_confidence,
+      knowledge_candidates: data.knowledge_candidates || [],
+      prerequisite_gaps: data.prerequisite_gaps || [],
+      learning_path: normalizeLearningPath(data),
+      source: data.source || '',
+      refused: !!data.refused,
+      failed: false,
+      retryQuestion: text,
+      open: { pre: false, body: true, cons: false },
+      videosLoaded: false,
+      videosLoading: false,
+      videosError: false,
+      videosNoIds: false
+    })
+
     attachment.statusText = '已完成'
-    if (attachmentMessage.value) attachmentMessage.value.attachment.statusText = attachment.statusText
+
+    if (attachmentMessage.value) {
+      attachmentMessage.value.attachment.statusText = attachment.statusText
+    }
+
     clearAttachment()
     scrollBottom()
+
+    // 图片/PDF 解题成功后，自动朗读
+if (autoPlayEnabled.value && !messages[messages.length - 1].refused) {
+  const currentIndex = messages.length - 1
+  const answerText = getSpeechText(messages[currentIndex])
+
+  if (answerText) {
+    setTimeout(() => {
+      playTTS(answerText, currentIndex)
+    }, 300)
+  }
+}
+
   } catch (e) {
-    // 详细打印 422 错误信息，便于定位后端验证失败原因
+    // 详细打印错误信息，便于定位问题
     console.error('[solveAttachment] 请求失败:', {
       status: e?.status,
       code: e?.code,
@@ -1580,16 +1975,27 @@ async function solveAttachment(knowledgePointId = null) {
       details: e?.details,
       attachmentId: attachment.id,
       textLength: text?.length,
-      payload: JSON.stringify(payload),
+      payload: JSON.stringify(payload)
     })
+
     attachment.statusText = '解答失败'
+
     if (attachmentMessage.value) {
       attachmentMessage.value.attachment.statusText = attachment.statusText
-      attachmentMessage.value.attachment.errorText = (e && e.message) || '解答失败，请重试'
+      attachmentMessage.value.attachment.errorText =
+        (e && e.message) || '解答失败，请重试'
     }
-    uni.showToast({ title: (e && e.message) || '题目解答失败', icon: 'none' })
-  } finally { attachmentBusy.value = false }
+
+    uni.showToast({
+      title: (e && e.message) || '题目解答失败',
+      icon: 'none'
+    })
+
+  } finally {
+    attachmentBusy.value = false
+  }
 }
+
 
 async function retryAttachmentUpload(msg) {
   if (!msg || !msg.attachment || attachmentBusy.value) return
@@ -1668,6 +2074,17 @@ function send() {
         videosError: false,
         videosNoIds: false,
       })
+            // 普通文字提问成功后，自动朗读
+      if (autoPlayEnabled.value && !data.refused) {
+        const currentIndex = messages.length - 1
+        const answerText = getSpeechText(messages[currentIndex])
+
+        if (answerText) {
+          setTimeout(() => {
+            playTTS(answerText, currentIndex)
+          }, 300)
+        }
+      }
     })
     .catch((e) => {
       if (e && e.status === 404) {
@@ -1982,6 +2399,17 @@ function goPath(msg) {
   font-size: 28rpx;
   font-weight: 600;
   color: #444;
+}
+.section-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.section-head-right .tts-btn {
+  margin: 0;
+  white-space: nowrap;
 }
 .arrow {
   color: #bbb;
@@ -2471,5 +2899,44 @@ function goPath(msg) {
 }
 .send-btn::after {
   border: none;
+}
+/* TTS 朗读按钮 */
+.tts-btn {
+  display: inline-block;
+  margin: 16rpx 12rpx 0 0;
+  padding: 0 18rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  font-size: 24rpx;
+  color: #2b6cb0;
+  background: #e8f0fb;
+  border: none;
+  border-radius: 999rpx;
+}
+
+.tts-btn::after {
+  border: none;
+}
+
+.tts-btn.tts-playing {
+  color: #fff;
+  background: #2b6cb0;
+}
+.sound-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  margin-left: 8px;
+  border-radius: 16px;
+  background: #e8f5ee;
+  color: #23965b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sound-toggle.sound-off {
+  background: #f1f1f1;
+  color: #888;
 }
 </style>

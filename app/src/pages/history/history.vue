@@ -64,26 +64,77 @@
           <view v-if="!keyword" class="group-title">{{ group.name }}</view>
           
           <view
-            v-for="item in group.items"
-            :key="item.id"
-            class="item"
-            @click="openConversation(item)"
-          >
-            <view class="item-main">
-              <!-- 核心：高亮显示匹配的文字 -->
-              <text class="item-title">
-                <text 
-                  v-for="(chunk, index) in highlightText(item.title || '新对话', keyword)" 
-                  :key="index"
-                  :class="{ 'highlight-text': chunk.isMatch }"
-                >{{ chunk.text }}</text>
-              </text>
-              <text class="item-meta">
-                {{ formatTime(item.last_message_at) }} · {{ item.message_count || 0 }} 条消息
-              </text>
-            </view>
-            <text class="delete" @click.stop="removeConversation(item)">删除</text>
-          </view>
+  v-for="item in group.items"
+  :key="item.id"
+  class="conversation-entry"
+>
+  <!-- 会话卡片 -->
+  <view class="item" @click="openConversation(item)">
+
+    <!-- 左侧展开箭头 -->
+   <view class="expand-toggle" @click.stop="toggleExpand(item)">
+  <text class="arrow">
+    {{ expandedIds.includes(item.id) ? '▾' : '▸' }}
+  </text>
+</view>
+
+    <!-- 会话标题和时间 -->
+    <view class="item-main">
+      <text class="item-title">
+        <text
+          v-for="(chunk, index) in highlightText(item.title || '新对话', keyword)"
+          :key="index"
+          :class="{ 'highlight-text': chunk.isMatch }"
+        >{{ chunk.text }}</text>
+      </text>
+
+      <text class="item-meta">
+        {{ formatTime(item.last_message_at) }} · {{ item.message_count || 0 }} 条消息
+      </text>
+    </view>
+
+    <!-- 删除 -->
+    <text class="delete" @click.stop="removeConversation(item)">
+      删除
+    </text>
+  </view>
+
+  <!-- 展开的问题列表 -->
+  <view
+    v-if="expandedIds.includes(item.id)"
+    class="question-list"
+  >
+    <view
+      v-if="loadingQuestions[item.id]"
+      class="question-loading"
+    >
+      正在加载问题…
+    </view>
+
+    <view
+      v-else-if="conversationQuestions[item.id] && conversationQuestions[item.id].length"
+      class="question-list-inner"
+    >
+      <view
+        v-for="(question, qIndex) in conversationQuestions[item.id]"
+        :key="question.id"
+        class="question-item"
+        @click.stop="openQuestion(item, question)"
+      >
+        <text class="question-number">{{ qIndex + 1 }}.</text>
+        <text class="question-content">{{ question.content }}</text>
+        <text class="question-arrow">›</text>
+      </view>
+    </view>
+
+    <view
+      v-else-if="conversationQuestions[item.id]"
+      class="question-loading"
+    >
+      这个会话还没有问题
+    </view>
+  </view>
+</view>
         </view>
 
         <view v-if="hasMore" class="load-more" @click="loadMore">
@@ -97,7 +148,11 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { deleteConversation, listConversations } from '../../api.js'
+import {
+  deleteConversation,
+  listConversations,
+  listMessages
+} from '../../api.js'
 import { store } from '../../store.js'
 
 const items = ref([])
@@ -106,6 +161,14 @@ const hasMore = ref(false)
 const loading = ref(false)
 const loadingMore = ref(false)
 const keyword = ref('') 
+// 已展开的会话 ID
+const expandedIds = ref([])
+
+// 各会话的问题列表缓存
+const conversationQuestions = ref({})
+
+// 正在加载问题列表的会话
+const loadingQuestions = ref({})
 
 const loggedIn = computed(() => !!(store.auth.user && store.auth.token))
 
@@ -237,6 +300,97 @@ async function loadMore() {
 function openConversation(item) {
   store.pendingIndexAction = { type: 'open', conversationId: item.id }
   uni.switchTab({ url: '/pages/index/index' })
+}
+
+// 展开或收起某个会话的问题列表
+async function toggleExpand(item) {
+  const id = item.id
+
+  // 如果已经展开，就收起
+  if (expandedIds.value.includes(id)) {
+    expandedIds.value = expandedIds.value.filter(x => x !== id)
+    return
+  }
+
+  // 展开
+  expandedIds.value = [...expandedIds.value, id]
+
+  // 已经加载过就不重复请求
+  if (conversationQuestions.value[id]) return
+
+  loadingQuestions.value = {
+    ...loadingQuestions.value,
+    [id]: true
+  }
+
+  try {
+    let allMessages = []
+    let nextCursor = null
+    let hasMoreMessages = true
+
+    // 分页获取该会话的全部消息
+    while (hasMoreMessages) {
+      const page = await listMessages(id, {
+        limit: 50,
+        cursor: nextCursor
+      })
+
+      allMessages = allMessages.concat(page.items || [])
+      nextCursor = page.next_cursor || null
+      hasMoreMessages = !!page.has_more
+
+      // 防止异常分页数据造成无限循环
+      if (hasMoreMessages && !nextCursor) {
+        break
+      }
+    }
+
+    // 只保留用户提出的问题
+    const questions = allMessages
+      .filter(message => message.role === 'user')
+      .map(message => ({
+        id: message.id,
+        content:
+          message.content ||
+          (message.attachment && (
+            message.attachment.question_text ||
+            message.attachment.original_name ||
+            message.attachment.name
+          )) ||
+          '附件题目'
+      }))
+
+    conversationQuestions.value = {
+      ...conversationQuestions.value,
+      [id]: questions
+    }
+  } catch (e) {
+    uni.showToast({
+      title: (e && e.message) || '加载问题列表失败',
+      icon: 'none'
+    })
+
+    // 加载失败时允许再次展开重试
+    expandedIds.value = expandedIds.value.filter(x => x !== id)
+  } finally {
+    loadingQuestions.value = {
+      ...loadingQuestions.value,
+      [id]: false
+    }
+  }
+}
+
+// 点击某个问题，跳转到问答页并传递消息 ID
+function openQuestion(item, question) {
+  store.pendingIndexAction = {
+    type: 'open',
+    conversationId: item.id,
+    messageId: question.id
+  }
+
+  uni.switchTab({
+    url: '/pages/index/index'
+  })
 }
 
 function newConversation() {
@@ -421,6 +575,9 @@ watch(
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  text-align: left;
 }
 .item-title {
   font-size: 30rpx;
@@ -429,6 +586,84 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+}
+
+/* 会话卡片及展开内容 */
+.conversation-entry {
+  margin-bottom: 18rpx;
+}
+
+.conversation-entry .item {
+  margin-bottom: 0;
+}
+
+/* 左侧展开箭头 */
+.expand-toggle {
+  width: 48rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.question-list {
+  margin: 12rpx 16rpx 0;
+  padding: 12rpx 20rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.04);
+}
+
+.question-item {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 8rpx;
+  border-bottom: 1rpx solid #f3f3f3;
+}
+
+.question-item:last-child {
+  border-bottom: none;
+}
+
+.question-number {
+  color: #999;
+  font-size: 22rpx;
+  margin-right: 12rpx;
+  flex-shrink: 0;
+}
+
+.question-content {
+  flex: 1;
+  min-width: 0;
+  font-size: 26rpx;
+  color: #444;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.question-arrow {
+  color: #aaa;
+  font-size: 28rpx;
+  margin-left: 12rpx;
+}
+
+.arrow {
+  font-size: 26rpx;
+  color: #999;
+  line-height: 1;
+}
+
+.question-loading {
+  padding: 24rpx 0;
+  color: #999;
+  font-size: 24rpx;
+  text-align: center;
 }
 
 /* 匹配关键字高亮样式 */
@@ -441,7 +676,9 @@ watch(
   margin-top: 10rpx;
   font-size: 24rpx;
   color: #999;
+  text-align: left;
 }
+
 .delete {
   margin-left: 20rpx;
   font-size: 24rpx;
