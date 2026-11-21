@@ -1,0 +1,44 @@
+// Web 端降级：只保留接口，统一返回“不支持”。
+// 真实提醒由 selfdiscipline/reminder-web.js 用 setTimeout 实现。
+
+export function getStatus(): UTSJSONObject {
+  return {
+    supported: false,
+    notifications: false,
+    exactAlarm: false,
+    exactAlarmNeeded: false,
+    sdk: 0,
+    vendor: 'web'
+  }
+}
+
+export function requestNotificationPermission(): void {}
+
+export function openNotificationSettings(): void {}
+
+export function canScheduleExactAlarms(): boolean {
+  return false
+}
+
+export function openExactAlarmSettings(): void {}
+
+export function schedule(
+  id: string,
+  triggerAt: number,
+  title: string,
+  body: string,
+  kind: string,
+  refId: string
+): UTSJSONObject {
+  return { ok: false, exact: false, reason: 'web-unsupported' }
+}
+
+export function cancel(id: string): void {}
+
+export function cancelAll(): void {}
+
+export function getScheduled(): UTSJSONArray<UTSJSONObject> {
+  return [] as UTSJSONArray<UTSJSONObject>
+}
+
+export function postNow(title: string, body: string, kind: string, refId: string): void {}

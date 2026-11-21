@@ -75,6 +75,17 @@ def clear_login(ip: str, username: str) -> None:
         _events.pop(f"login:{ip}:{username.lower()}", None)
 
 
+def check_selfdiscipline_parse(user_id: str) -> tuple[bool, int]:
+    """自律事项 AI 解析：按用户限流，防止匿名/登录后被刷。"""
+    limit, window = settings.selfdiscipline_parse_rate_limit()
+    return _check(f"sd_parse:{user_id}", limit, window)
+
+
+def record_selfdiscipline_parse(user_id: str) -> None:
+    _, window = settings.selfdiscipline_parse_rate_limit()
+    _record(f"sd_parse:{user_id}", window)
+
+
 def reset() -> None:
     """测试用：清空所有计数。"""
     with _lock:

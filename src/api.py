@@ -22,6 +22,9 @@ from .generator import QwenGenerator
 from .graph import load_full_graph
 from .loader import load_nodes
 from .pipeline import run_qa, split_generated_answer
+from .quiz_api import router as quiz_router
+from .recommend_api import router as recommend_router
+from .selfdiscipline_api import router as selfdiscipline_router
 from .settings import qa_match_scope
 from .subgraph import OUT_PATH, RAW_PATH
 from .video_api import router as video_router
@@ -105,6 +108,9 @@ app.include_router(attachment_router)
 app.include_router(chat_router)
 app.include_router(video_router)
 app.include_router(tts_router)  # 👈 注册 TTS 路由
+app.include_router(quiz_router)  # 学情诊断：目录 + 会话
+app.include_router(recommend_router)  # 个性化推荐：首页今日建议
+app.include_router(selfdiscipline_router)  # 自律事项：AI 整理
 
 # CORS：App 端 uni.request 不受同源限制，但 H5 调试需要放开跨域。
 app.add_middleware(
@@ -142,6 +148,19 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     conversation_id: str | None = Field(default=None, max_length=64)
     client_request_id: str | None = Field(default=None, max_length=64)
+    # 游客没有账号年级，允许前端带本地年级；登录用户优先用资料里的年级。
+    grade: int | None = Field(default=None, ge=1, le=9)
+
+    @field_validator("grade", mode="before")
+    @classmethod
+    def _grade(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("年级必须是 1-9 的整数")
+        if not 1 <= value <= 9:
+            raise ValueError("年级必须在 1-9 之间")
+        return value
 
     @field_validator("question")
     @classmethod
@@ -237,11 +256,17 @@ def ask(
     conn=Depends(get_db),
 ):
     """问答。"""
+    # 登录用户以资料里的年级为准；资料未设置时退回前端本地年级（游客也用它）。
+    # 年级只影响讲解深度，不参与检索过滤。
+    student_grade = (auth_ctx.user.get("grade") if auth_ctx else None) or req.grade
+
     # 1) 游客路径：完全不落库
     if auth_ctx is None:
         if req.conversation_id:
             raise ApiError(401, "AUTH_REQUIRED", "登录后才能保存或打开会话")
-        result = run_qa(req.question, graph, kp_nodes)
+        result = run_qa(
+            req.question, graph, kp_nodes, student_grade=student_grade
+        )
         result.pop("_meta", None)
         _fill_answer(result)
         result.pop("prompt", None)
@@ -270,7 +295,9 @@ def ask(
             )
 
     # 3) 运行检索/诊断流水线（不调用大模型，先拿到结构化证据）
-    result = run_qa(req.question, graph, kp_nodes)
+    result = run_qa(
+        req.question, graph, kp_nodes, student_grade=student_grade
+    )
     meta = result.pop("_meta", None)
 
     # 4) 确定会话：必须属于当前用户；没有则自动创建
@@ -284,6 +311,7 @@ def ask(
             conn,
             user_id,
             title=chat_service.title_from_question(req.question),
+            grade_at_creation=student_grade,
         )
         conversation_id = conv["id"]
 

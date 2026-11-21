@@ -1,0 +1,48 @@
+{
+  "id": "com.ikgr.theme.mono",
+  "name": "极简白",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "ikgr",
+  "description": "黑白高对比，信息优先",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#FAFAFA",
+      "card": "#FFFFFF",
+      "t1": "#111111",
+      "t2": "#4A4A4A",
+      "t3": "#7A7A7A",
+      "line": "#E3E3E3",
+      "primary": "#111827",
+      "primaryWeak": "#ECEEF2",
+      "onPrimary": "#FFFFFF",
+      "block": "#111111",
+      "onBlock": "#FFFFFF",
+      "soft": "#F1F1F1",
+      "inputBg": "#FFFFFF",
+      "danger": "#D32F2F",
+      "success": "#2E7D32"
+    },
+    "darkColors": {
+      "bg": "#050505",
+      "card": "#151515",
+      "t1": "#FAFAFA",
+      "t2": "#C7C7C7",
+      "t3": "#8F8F8F",
+      "line": "#333333",
+      "primary": "#FAFAFA",
+      "primaryWeak": "#262626",
+      "onPrimary": "#0A0A0A",
+      "block": "#FAFAFA",
+      "onBlock": "#050505",
+      "soft": "#1E1E1E",
+      "inputBg": "#171717",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "radius": 12,
+    "darkRadius": 12
+  }
+}

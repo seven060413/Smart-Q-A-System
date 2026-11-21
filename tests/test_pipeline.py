@@ -1,6 +1,32 @@
-"""生成结果拆分的单元测试：讲解正文 + 巩固练习。"""
+"""生成结果拆分与提示词年级上下文的单元测试。"""
 
-from src.pipeline import split_generated_answer
+from src.graph import build_digraph
+from src.models import Edge, Node
+from src.pipeline import run_qa, split_generated_answer
+
+
+def _qa_prompt(student_grade=None):
+    graph = build_digraph(
+        [Node("A", "Concept", "甲"), Node("B", "Concept", "乙")],
+        [Edge("B", "A", "prerequisites_for")],
+    )
+    nodes = [Node("A", "Concept", "甲"), Node("B", "Concept", "乙")]
+    result = run_qa("什么是甲", graph, nodes, student_grade=student_grade)
+    return result["prompt"]
+
+
+def test_提示词包含年级背景():
+    prompt = _qa_prompt(3)
+    assert "【学生背景】" in prompt
+    assert "三年级" in prompt
+    assert "不是内容限制" in prompt
+    # 跨年级问题仍要完整回答。
+    assert "仍然完整回答" in prompt
+
+
+def test_未设置年级时提示词不含年级背景():
+    prompt = _qa_prompt()
+    assert "【学生背景】" not in prompt
 
 
 def test_拆分讲解与巩固练习():

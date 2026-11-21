@@ -1,0 +1,48 @@
+{
+  "id": "com.ikgr.theme.teal",
+  "name": "青屿",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "ikgr",
+  "description": "青绿低饱和，安静专注",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#F1F8F7",
+      "card": "#FFFFFF",
+      "t1": "#15302D",
+      "t2": "#48625E",
+      "t3": "#7F9692",
+      "line": "#D8E7E4",
+      "primary": "#178A7A",
+      "primaryWeak": "#E2F4F0",
+      "onPrimary": "#FFFFFF",
+      "block": "#15302D",
+      "onBlock": "#FFFFFF",
+      "soft": "#EAF4F2",
+      "inputBg": "#FFFFFF",
+      "danger": "#D64545",
+      "success": "#1F8A5B"
+    },
+    "darkColors": {
+      "bg": "#0E1B1A",
+      "card": "#162724",
+      "t1": "#E3F2EF",
+      "t2": "#A6C0BA",
+      "t3": "#7B948F",
+      "line": "#2A3D39",
+      "primary": "#4FC3B0",
+      "primaryWeak": "#1B3330",
+      "onPrimary": "#06120F",
+      "block": "#E3F2EF",
+      "onBlock": "#0E1B1A",
+      "soft": "#1B2E2B",
+      "inputBg": "#192A27",
+      "danger": "#FF7A7A",
+      "success": "#57D39B"
+    },
+    "radius": 24,
+    "darkRadius": 24
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "com.ikgr.theme.sea",
+  "name": "海盐蓝",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "ikgr",
+  "description": "冷色清爽，适合长时间阅读",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#F3F8FC",
+      "card": "#FFFFFF",
+      "t1": "#16283B",
+      "t2": "#4A5E73",
+      "t3": "#8394A6",
+      "line": "#DCE6EF",
+      "primary": "#2F6FA8",
+      "primaryWeak": "#E3EFFA",
+      "onPrimary": "#FFFFFF",
+      "block": "#16283B",
+      "onBlock": "#FFFFFF",
+      "soft": "#EDF3F8",
+      "inputBg": "#FFFFFF",
+      "danger": "#D64545",
+      "success": "#2E8B62"
+    },
+    "darkColors": {
+      "bg": "#0E1822",
+      "card": "#16222E",
+      "t1": "#E6EEF5",
+      "t2": "#A9BACB",
+      "t3": "#7F92A5",
+      "line": "#2A3947",
+      "primary": "#6FB1E8",
+      "primaryWeak": "#1B2E40",
+      "onPrimary": "#08131F",
+      "block": "#E6EEF5",
+      "onBlock": "#0E1822",
+      "soft": "#1C2A37",
+      "inputBg": "#1A2632",
+      "danger": "#FF7A7A",
+      "success": "#57D39B"
+    },
+    "radius": 24,
+    "darkRadius": 24
+  }
+}

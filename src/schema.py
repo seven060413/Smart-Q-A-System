@@ -325,6 +325,131 @@ CREATE INDEX ix_attachments_user ON attachments(user_id, created_at);
 CREATE INDEX ix_attachments_conversation ON attachments(conversation_id, created_at);
 """
 
+# version 8：学情诊断题库与会话。
+# 说明：
+# - questions 以 (dataset_version, id) 为主键，允许同一题库有多个版本；
+# - quiz_sessions 同时服务登录用户和游客（user_id 为 NULL），state_json 存引擎状态；
+# - quiz_attempts 记录每题作答，client_request_id 用于提交重试幂等；
+# - 答案只存在服务端，接口永不返回 answer。
+QUIZ_SCHEMA = """
+CREATE TABLE questions (
+    dataset_version TEXT NOT NULL,
+    id              TEXT NOT NULL,
+    node_key        TEXT NOT NULL,
+    node_name       TEXT,
+    grade           INTEGER,
+    chapter         TEXT,
+    difficulty      TEXT NOT NULL,
+    type            TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    choices_json    TEXT,
+    answer          TEXT NOT NULL,
+    explanation     TEXT,
+    figure_svg      TEXT,
+    verify_expr     TEXT,
+    hide_choice_text INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (dataset_version, id)
+);
+CREATE INDEX ix_questions_node ON questions(dataset_version, node_key);
+
+CREATE TABLE quiz_sessions (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT REFERENCES users(id) ON DELETE SET NULL,
+    mode            TEXT NOT NULL CHECK (mode IN ('single', 'chapter', 'grade')),
+    grade           INTEGER,
+    semester        TEXT,
+    scope_json      TEXT NOT NULL,
+    max_questions   INTEGER NOT NULL CHECK (max_questions > 0),
+    mastery_streak  INTEGER NOT NULL CHECK (mastery_streak IN (2, 3, 5)),
+    status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'completed', 'aborted')),
+    state_json      TEXT NOT NULL,
+    result_json     TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    finished_at     TEXT,
+    expires_at      TEXT NOT NULL
+);
+CREATE INDEX ix_quiz_sessions_user ON quiz_sessions(user_id, created_at DESC);
+CREATE INDEX ix_quiz_sessions_expiry ON quiz_sessions(expires_at);
+
+CREATE TABLE quiz_attempts (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id        TEXT NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+    question_id       TEXT NOT NULL,
+    node_key          TEXT NOT NULL,
+    ordinal           INTEGER NOT NULL,
+    student_answer    TEXT,
+    is_correct        INTEGER NOT NULL CHECK (is_correct IN (0, 1)),
+    client_request_id TEXT,
+    response_json     TEXT,
+    created_at        TEXT NOT NULL,
+    CONSTRAINT uq_quiz_attempt_question UNIQUE (session_id, question_id),
+    CONSTRAINT uq_quiz_attempt_ordinal UNIQUE (session_id, ordinal)
+);
+CREATE INDEX ix_quiz_attempts_session ON quiz_attempts(session_id, ordinal);
+CREATE UNIQUE INDEX ux_quiz_attempts_client
+    ON quiz_attempts(session_id, client_request_id)
+    WHERE client_request_id IS NOT NULL;
+"""
+
+# version 10：持续学习闭环。
+# 说明：
+# - quiz_sessions 记录题库版本与范围总数，供趋势比较与覆盖率计算；
+# - quiz_attempts 记录作答时的题目快照，题库更新后错题集内容保持不变；
+# - wrong_question_marks 只存用户对错题的标记（待复习/已掌握/已忽略），
+#   不修改 attempts；
+# - 旧数据新列为 NULL，读接口按 pansgo.SOURCE_COMMIT / 当前题库回退。
+LEARNING_LOOP_SCHEMA = """
+ALTER TABLE quiz_sessions ADD COLUMN dataset_version TEXT;
+ALTER TABLE quiz_sessions ADD COLUMN scope_count INTEGER;
+
+ALTER TABLE quiz_attempts ADD COLUMN dataset_version TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN difficulty TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN topic_name TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN chapter TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN grade INTEGER;
+ALTER TABLE quiz_attempts ADD COLUMN prompt_snapshot TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN choices_snapshot_json TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN answer_snapshot TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN explanation_snapshot TEXT;
+ALTER TABLE quiz_attempts ADD COLUMN figure_snapshot TEXT;
+
+CREATE TABLE wrong_question_marks (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dataset_version TEXT NOT NULL,
+    question_id     TEXT NOT NULL,
+    node_key        TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'mastered', 'ignored')),
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (user_id, dataset_version, question_id)
+);
+CREATE INDEX ix_wrong_marks_user
+    ON wrong_question_marks(user_id, status, updated_at DESC);
+
+CREATE INDEX ix_quiz_sessions_user_time
+    ON quiz_sessions(user_id, created_at DESC);
+
+CREATE INDEX ix_quiz_attempts_user_wrong
+    ON quiz_attempts(session_id, is_correct, created_at);
+"""
+
+# version 11：学生年级。
+# 说明：
+# - users.grade 是「当前年级」，只允许 1-9（小学一年级到初中九年级）；
+# - grade_updated_at 记录年级变更时间，供学段升级提示与推荐解释使用；
+# - conversations.grade_at_creation 是会话创建时的年级快照，只用于解释历史，
+#   不参与聊天过滤（聊天始终按内容跨年级召回）。
+STUDENT_GRADE_SCHEMA = """
+ALTER TABLE users ADD COLUMN grade INTEGER CHECK (grade BETWEEN 1 AND 9);
+ALTER TABLE users ADD COLUMN grade_updated_at TEXT;
+
+ALTER TABLE conversations ADD COLUMN grade_at_creation INTEGER;
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(version=1, name="initial_schema", sql=INITIAL_SCHEMA),
     Migration(
@@ -391,6 +516,17 @@ MIGRATIONS: list[Migration] = [
         name="user_avatar",
         sql="ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT NULL;",
     ),
+    Migration(version=8, name="quiz_bank", sql=QUIZ_SCHEMA),
+    Migration(
+        version=9,
+        name="question_answer_variants",
+        sql=(
+            "ALTER TABLE questions ADD COLUMN accept_json TEXT;"
+            "ALTER TABLE questions ADD COLUMN unordered INTEGER NOT NULL DEFAULT 0;"
+        ),
+    ),
+    Migration(version=10, name="learning_loop", sql=LEARNING_LOOP_SCHEMA),
+    Migration(version=11, name="student_grade", sql=STUDENT_GRADE_SCHEMA),
 ]
 
 

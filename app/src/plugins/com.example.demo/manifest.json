@@ -1,0 +1,7 @@
+{
+  "id": "com.example.demo",
+  "name": "示例功能插件",
+  "version": "1.0.0",
+  "type": "feature",
+  "permissions": ["ui"]
+}

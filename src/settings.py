@@ -66,6 +66,13 @@ def scrypt_n() -> int:
     return _int_env("AUTH_SCRYPT_N", 32768, 1024, 1048576)
 
 
+def selfdiscipline_parse_rate_limit() -> tuple[int, int]:
+    """自律事项 AI 解析限流：(次数, 窗口秒数)，默认每用户 10 分钟 20 次。"""
+    limit = _int_env("SD_PARSE_RATE_LIMIT", 20, 1, 1000)
+    window = _int_env("SD_PARSE_RATE_WINDOW_SECONDS", 600, 1, 86400)
+    return limit, window
+
+
 def qa_match_scope() -> str:
     """问答知识点匹配范围。
 

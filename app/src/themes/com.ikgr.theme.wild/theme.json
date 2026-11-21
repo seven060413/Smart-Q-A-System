@@ -1,0 +1,50 @@
+{
+  "id": "com.ikgr.theme.wild",
+  "name": "原野",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "BiliLite / ikgr",
+  "description": "绿色护眼色调 + 半透明卡片 + 手机/平板双背景图",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#1E2B22",
+      "card": "#213A2ED9",
+      "t1": "#F2F8F0",
+      "t2": "#B5C9AE",
+      "t3": "#D5E4CE",
+      "line": "#7CA46B44",
+      "primary": "#7BC96F",
+      "primaryWeak": "#7BC96F26",
+      "onPrimary": "#0B2119",
+      "block": "#7BC96F",
+      "onBlock": "#0B2119",
+      "soft": "#23342966",
+      "inputBg": "#23342966",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "darkColors": {
+      "bg": "#182219",
+      "card": "#1D3024D9",
+      "t1": "#F2F8F0",
+      "t2": "#B5C9AE",
+      "t3": "#D5E4CE",
+      "line": "#7CA46B44",
+      "primary": "#7BC96F",
+      "primaryWeak": "#7BC96F26",
+      "onPrimary": "#0B2119",
+      "block": "#7BC96F",
+      "onBlock": "#0B2119",
+      "soft": "#1B2A2066",
+      "inputBg": "#1B2A2066",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "radius": 16,
+    "darkRadius": 16,
+    "backgroundImage": "/static/themes/wild/phone_bg.jpg",
+    "backgroundImageTablet": "/static/themes/wild/tablet_bg.jpg"
+  }
+}

@@ -269,6 +269,77 @@ def test_session_row_is_created(auth_client):
     assert row["expires_at"] > row["created_at"]
 
 
+def test_profile_grade_roundtrip_and_clear(auth_client):
+    client, db_path = auth_client
+    data = _register(client).json()
+    token = data["token"]
+    assert data["user"]["grade"] is None
+    headers = _auth(token)
+
+    resp = client.put("/api/auth/profile", json={"grade": 3}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["grade"] == 3
+    assert client.get("/api/auth/me", headers=headers).json()["grade"] == 3
+
+    # 不传 grade 时保持原值，不能因为默认 None 被清空。
+    resp = client.put(
+        "/api/auth/profile", json={"display_name": "小明"}, headers=headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["grade"] == 3
+    assert resp.json()["display_name"] == "小明"
+
+    # 显式传 null 才清空年级。
+    resp = client.put("/api/auth/profile", json={"grade": None}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["grade"] is None
+    assert client.get("/api/auth/me", headers=headers).json()["grade"] is None
+
+    conn = db_module.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT display_name, grade, grade_updated_at FROM users WHERE id = ?",
+            (data["user"]["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    # 回归：旧实现参数顺序错位，会把 display_name 写成时间戳。
+    assert row["display_name"] == "小明"
+    assert row["grade"] is None
+
+
+def test_profile_grade_is_set_with_timestamp(auth_client):
+    client, db_path = auth_client
+    data = _register(client).json()
+    headers = _auth(data["token"])
+
+    resp = client.put("/api/auth/profile", json={"grade": 9}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["grade"] == 9
+
+    conn = db_module.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT grade, grade_updated_at FROM users WHERE id = ?",
+            (data["user"]["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["grade"] == 9
+    assert row["grade_updated_at"]
+
+
+@pytest.mark.parametrize("bad_grade", [0, 10, -1, True, "3"])
+def test_profile_grade_rejects_invalid_values(auth_client, bad_grade):
+    client, _ = auth_client
+    token = _register(client).json()["token"]
+    resp = client.put(
+        "/api/auth/profile", json={"grade": bad_grade}, headers=_auth(token)
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_register_rate_limit(auth_client, monkeypatch):
     client, _ = auth_client
     # fixture 默认关闭限流；这里临时开启并只允许 1 次/小时。

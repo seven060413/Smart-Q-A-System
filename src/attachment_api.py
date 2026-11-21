@@ -210,7 +210,12 @@ def upload_attachment(
 ):
     conversation_id = _conversation(conn, ctx.user["id"], conversation_id)
     if conversation_id is None:
-        conversation = chat_service.create_conversation(conn, ctx.user["id"], title="图片题目")
+        conversation = chat_service.create_conversation(
+            conn,
+            ctx.user["id"],
+            title="图片题目",
+            grade_at_creation=ctx.user.get("grade"),
+        )
         conversation_id = conversation["id"]
     name = (file.filename or "").strip()
     is_pdf = name.lower().endswith(".pdf") or file.content_type == "application/pdf"

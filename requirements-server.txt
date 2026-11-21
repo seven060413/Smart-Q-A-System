@@ -9,6 +9,8 @@ openai>=1.52.0
 python-dotenv>=1.0.1
 # 语音上传接口 /api/transcribe 的 multipart 解析依赖
 python-multipart>=0.0.9
+# 语音朗读 /api/tts/stream 的 TTS 合成依赖
+edge-tts>=7.0.0
 # 图片实际格式校验与安全解码；OCR 供应商 SDK 不内置
 Pillow>=10.4
 # PDF 文本层读取与受限页面渲染；无需系统 Poppler

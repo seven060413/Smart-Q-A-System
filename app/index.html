@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- B 站封面图有防盗链：不发送 Referer，避免 i0/i1.hdslb.com 返回 403 -->
+    <meta name="referrer" content="no-referrer" />
     <script>
       var coverSupport = 'CSS' in window && typeof CSS.supports === 'function' && (CSS.supports('top: env(a)') ||
         CSS.supports('top: constant(a)'))

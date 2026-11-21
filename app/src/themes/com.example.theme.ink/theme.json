@@ -1,0 +1,49 @@
+{
+  "id": "com.example.theme.ink",
+  "name": "水墨",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "example",
+  "description": "米色纸感背景 + 近黑文字",
+  "hidden": true,
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#F5F0E8",
+      "card": "#FFFFFF",
+      "t1": "#1A1A1E",
+      "t2": "#5F6368",
+      "t3": "#8A8F99",
+      "line": "#E0E0E4",
+      "primary": "#2B6CB0",
+      "primaryWeak": "#E8F0FB",
+      "onPrimary": "#FFFFFF",
+      "block": "#1C1C1E",
+      "onBlock": "#FFFFFF",
+      "soft": "#F0F2F5",
+      "inputBg": "#FFFFFF",
+      "danger": "#E53E3E",
+      "success": "#2F9E68"
+    },
+    "darkColors": {
+      "bg": "#1A1712",
+      "card": "#24201A",
+      "t1": "#F3EDE3",
+      "t2": "#C9C0B4",
+      "t3": "#9C9387",
+      "line": "#3A342B",
+      "primary": "#84B3E0",
+      "primaryWeak": "#2A3440",
+      "onPrimary": "#0B1220",
+      "block": "#F3EDE3",
+      "onBlock": "#1A1712",
+      "soft": "#2B2620",
+      "inputBg": "#2A251F",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "radius": 24,
+    "darkRadius": 24
+  }
+}

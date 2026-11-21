@@ -21,7 +21,18 @@
           <text class="menu-arrow">›</text>
         </view>
       </template>
-      <view v-else class="menu-item" @click="goAuth">
+      <view class="menu-item" @click="goWrong">
+        <text class="menu-label">错题集</text>
+        <view class="menu-right">
+          <text v-if="loggedIn" class="badge" :class="{ zero: wrongCount === 0 }">{{ wrongCount }}</text>
+          <text class="menu-arrow">›</text>
+        </view>
+      </view>
+      <view class="menu-item" @click="goTrend">
+        <text class="menu-label">学情趋势</text>
+        <text class="menu-arrow">›</text>
+      </view>
+      <view v-if="!loggedIn" class="menu-item" @click="goAuth">
         <text class="menu-label">登录 / 注册</text>
         <text class="menu-arrow">›</text>
       </view>
@@ -29,8 +40,8 @@
 
     <text class="hint">
       {{ loggedIn
-        ? '账号资料、退出登录和历史记录都在现有页面中操作。'
-        : '游客也可以直接问答；登录后可保存账号状态和聊天记录。' }}
+        ? '错题集和学情趋势会记录每次诊断的薄弱点与作答历史。'
+        : '游客也可以直接诊断；登录后可保存错题、历史与学情趋势。' }}
     </text>
 
     <AppTabBar :active="TAB_MY" />
@@ -41,10 +52,12 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import AppTabBar from '../../components/AppTabBar.vue'
+import { listWrongQuestions } from '../../api.js'
 import { TAB_MY, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
 
 const loggedIn = computed(() => !!(store.auth.user && store.auth.token))
+const wrongCount = ref(0)
 
 // 优先使用后端返回的 avatar/display_name，fallback 到本地缓存
 const customAvatar = ref((store.auth.user && store.auth.user.avatar) || uni.getStorageSync('user_avatar') || '')
@@ -77,6 +90,29 @@ function goHistory() {
   uni.navigateTo({ url: '/pages/history/history' })
 }
 
+function goWrong() {
+  if (!loggedIn.value) return goAuth()
+  uni.navigateTo({ url: '/pages/wrong/wrong' })
+}
+
+function goTrend() {
+  if (!loggedIn.value) return goAuth()
+  uni.navigateTo({ url: '/pages/trend/trend' })
+}
+
+async function loadWrongCount() {
+  if (!loggedIn.value) {
+    wrongCount.value = 0
+    return
+  }
+  try {
+    const data = await listWrongQuestions({ limit: 1, status: 'open' })
+    wrongCount.value = data.total || 0
+  } catch (e) {
+    wrongCount.value = 0
+  }
+}
+
 onLoad(() => {
   hideNativeTabBar()
 })
@@ -86,9 +122,11 @@ onShow(() => {
   hideNativeTabBar()
   const savedAvatar = uni.getStorageSync('user_avatar')
   customAvatar.value = savedAvatar || ''
-  
+
   const savedNickname = uni.getStorageSync('custom_nickname')
   customNickname.value = savedNickname || ''
+
+  loadWrongCount()
 })
 </script>
 
@@ -108,6 +146,9 @@ onShow(() => {
 .menu-item { display: flex; align-items: center; justify-content: space-between; padding: 30rpx 28rpx; border-bottom: 1rpx solid #f0f0f0; }
 .menu-item:last-child { border-bottom: none; }
 .menu-label { font-size: 30rpx; color: #333; }
+.menu-right { display: flex; align-items: center; }
+.badge { min-width: 34rpx; height: 34rpx; line-height: 34rpx; padding: 0 10rpx; margin-right: 12rpx; border-radius: 999rpx; background: #e53e3e; color: #fff; font-size: 22rpx; text-align: center; box-sizing: border-box; }
+.badge.zero { background: #e8f0fb; color: #2b6cb0; }
 .menu-arrow { font-size: 34rpx; color: #bbb; }
 .hint { display: block; margin-top: 28rpx; padding: 0 8rpx; font-size: 24rpx; color: #999; line-height: 1.6; text-align: center; }
 </style>

@@ -168,8 +168,16 @@ temp/
 *.orig
 *.rej
 
-# ---------- 其他 ----------
-# 根目录 package-lock.json 是“没有 package.json 的误产物”；
-# 建议在清理提交中执行 git rm --cached package-lock.json。
-# 如果以后真的建立根级 npm 工程，再删除下面这行注释。
-# /package-lock.json
+# 本地临时验证目录（含下载的 Chrome 配置、DOM 快照、调试脚本，体积大）
+.tmp-verify/
+.tmp-*/
+# 临时验证脚本留下的浏览器 profile / 日志
+chrome-prof*/
+chrome-cdp*/
+chrome_*.err
+
+# ---------- 根目录遗留误产物 ----------
+# 根目录 package-lock.json 是“没有 package.json 的误产物”
+/package-lock.json
+# 0 字节误创建的空文件
+/tar

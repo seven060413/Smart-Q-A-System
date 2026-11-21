@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src import db as db_module  # noqa: E402
+from src import quiz_service  # noqa: E402
 from src.schema import MIGRATIONS, apply_migrations, applied_versions  # noqa: E402
 
 
@@ -58,16 +59,21 @@ def run_migrate(db_path: str | None) -> None:
     try:
         pending = [m for m in sorted(MIGRATIONS, key=lambda x: x.version)
                    if m.version not in applied_versions(conn)]
-        if not pending:
+        if pending:
+            snapshot = _snapshot(conn)
+            if snapshot:
+                print(f"已创建迁移前快照: {snapshot}")
+            applied = apply_migrations(conn, MIGRATIONS)
+            print(f"本次应用 {len(applied)} 个迁移:")
+            for m in applied:
+                print(f"  - [{m.version}] {m.name}")
+        else:
             print("无待应用的迁移，数据库已是最新。")
-            return
-        snapshot = _snapshot(conn)
-        if snapshot:
-            print(f"已创建迁移前快照: {snapshot}")
-        applied = apply_migrations(conn, MIGRATIONS)
-        print(f"本次应用 {len(applied)} 个迁移:")
-        for m in applied:
-            print(f"  - [{m.version}] {m.name}")
+
+        # 幂等的数据补齐：旧单点/章节会话没有年级，按知识点反推。
+        updated = quiz_service.backfill_grade_snapshots(conn)
+        if updated:
+            print(f"已为 {updated} 个历史诊断会话补齐年级。")
     finally:
         conn.close()
 

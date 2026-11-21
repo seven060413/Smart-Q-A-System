@@ -255,11 +255,13 @@ export function attachmentContent(id) {
 
 export function askQuestion(
   question,
-  { conversationId = null, clientRequestId = null, auth = false } = {}
+  { conversationId = null, clientRequestId = null, auth = false, grade = null } = {}
 ) {
   const data = { question }
   if (conversationId) data.conversation_id = conversationId
   if (clientRequestId) data.client_request_id = clientRequestId
+  // 游客用本地年级；登录用户后端会优先用资料里的年级。
+  if (Number.isInteger(grade)) data.grade = grade
   return request('/api/ask', {
     method: 'POST',
     data,
@@ -282,6 +284,26 @@ export function listVideos(nodeKeys, { limit = 2 } = {}) {
     // 防止代理把 /api/videos 回退成 index.html 时静默显示“暂无视频”。
     if (!data || !Array.isArray(data.items)) {
       throw new ApiError('视频接口返回格式异常，请检查后端地址', {
+        status: 0,
+        code: 'BAD_RESPONSE',
+      })
+    }
+    return data
+  })
+}
+
+/**
+ * 视频讲解库：全部已审核视频，支持标题/知识点/UP主搜索与教材册筛选。
+ * book: '' | 七上 | 七下 | 八上 | 八下 | 九上 | 九下
+ */
+export function listVideoLibrary({ q = '', book = '', page = 1, pageSize = 20 } = {}) {
+  const params = [`page=${encodeURIComponent(page)}`, `page_size=${encodeURIComponent(pageSize)}`]
+  if (q) params.push(`q=${encodeURIComponent(q)}`)
+  if (book) params.push(`book=${encodeURIComponent(book)}`)
+  params.push(`_t=${Date.now()}`)
+  return request(`/api/videos/library?${params.join('&')}`, { timeout: 15000 }).then((data) => {
+    if (!data || !Array.isArray(data.items)) {
+      throw new ApiError('视频库接口返回格式异常，请检查后端地址', {
         status: 0,
         code: 'BAD_RESPONSE',
       })
@@ -367,9 +389,10 @@ export function logoutUser() {
 }
 
 /**
- * 更新个人资料（昵称、头像）
- * @param {Object} payload - { display_name?, avatar? }
- * @returns {Promise<{ id, username, display_name, role, avatar, created_at, last_login_at }>}
+ * 更新个人资料（昵称、头像、年级）
+ * @param {Object} payload - { display_name?, avatar?, grade? }
+ *   grade 传 1-9 设置年级；显式传 null 清空年级；不传则保持原值。
+ * @returns {Promise<{ id, username, display_name, role, avatar, grade, created_at, last_login_at }>}
  */
 export function updateProfile(payload) {
   return request('/api/auth/profile', {
@@ -391,5 +414,152 @@ export function checkAnswer(payload) {
     data: payload,
     auth: false,
     timeout: 30000, // LLM 调用可能较慢
+  })
+}
+
+// ==================== 学情诊断 ====================
+
+/** 诊断目录：年级 / 册 / 章 / 知识点。 */
+export function getDiagnosisCatalog() {
+  return request('/api/diagnose/catalog', { timeout: 20000 })
+}
+
+export function startDiagnosis(payload) {
+  return request('/api/diagnose/quiz', {
+    method: 'POST',
+    data: { action: 'start', ...payload },
+    auth: true, // 已登录时绑定用户；游客不带令牌也能用
+    timeout: 30000,
+  })
+}
+
+export function answerDiagnosis(payload) {
+  return request('/api/diagnose/quiz', {
+    method: 'POST',
+    data: { action: 'answer', ...payload },
+    auth: true,
+    timeout: 30000,
+  })
+}
+
+export function abortDiagnosis(sessionId) {
+  return request('/api/diagnose/quiz', {
+    method: 'POST',
+    data: { action: 'abort', session_id: sessionId },
+    auth: true,
+    timeout: 15000,
+  })
+}
+
+// ==================== 持续学习：结果 / 错题 / 图谱 / 趋势 ====================
+
+/** 最近一次完成的诊断（需登录）；没有时返回 null（HTTP 204）。 */
+export function getLatestDiagnosisSession() {
+  return request('/api/diagnose/sessions/latest', {
+    auth: true,
+    timeout: 15000,
+  }).then((data) => data || null)
+}
+
+export function listDiagnosisSessions({ limit = 20, cursor = null, grade = null } = {}) {
+  return request(`/api/diagnose/sessions${queryString({ limit, cursor, grade })}`, {
+    auth: true,
+    timeout: 20000,
+  })
+}
+
+/** 单次结果；游客凭本地保存的 session_id 也能读取。 */
+export function getDiagnosisSession(sessionId) {
+  return request(
+    `/api/diagnose/sessions/${encodeURIComponent(sessionId)}`,
+    { auth: true, timeout: 20000 }
+  )
+}
+
+export function listWrongQuestions({
+  grade = null,
+  chapter = null,
+  node_key = null,
+  status = 'open',
+  days = null,
+  limit = 20,
+  cursor = null,
+} = {}) {
+  return request(
+    `/api/diagnose/wrong-questions${queryString({
+      grade,
+      chapter,
+      node_key,
+      status,
+      days,
+      limit,
+      cursor,
+    })}`,
+    { auth: true, timeout: 20000 }
+  )
+}
+
+export function markWrongQuestion(attemptId, status) {
+  return request(
+    `/api/diagnose/wrong-questions/${encodeURIComponent(attemptId)}/mark`,
+    { method: 'POST', data: { status }, auth: true, timeout: 15000 }
+  )
+}
+
+/** 错题知识图谱；node_keys 可为数组或逗号分隔字符串。 */
+export function getDiagnosisGraph({ session_id = null, node_keys = null, depth = 2 } = {}) {
+  const keys = Array.isArray(node_keys)
+    ? node_keys.filter(Boolean).join(',')
+    : node_keys
+  return request(
+    `/api/diagnose/graph${queryString({ session_id, node_keys: keys, depth })}`,
+    { auth: true, timeout: 20000 }
+  )
+}
+
+export function getDiagnosisTrends({ grade = null, limit = 10 } = {}) {
+  return request(`/api/diagnose/trends${queryString({ grade, limit })}`, {
+    auth: true,
+    timeout: 20000,
+  })
+}
+
+/**
+ * 首页「今日建议」：错题 + 趋势 + 聊天知识点，年级只做排序权重。
+ * @returns {Promise<{ grade, generated_at, items: Array, reason }>}
+ */
+export function getTodayRecommendations({ limit = 3 } = {}) {
+  return request(`/api/recommendations/today${queryString({ limit })}`, {
+    auth: true,
+    timeout: 20000,
+  })
+}
+
+// ==================== 自律事项：AI 整理 ====================
+
+/**
+ * 把一句自然语言整理成结构化事项。
+ * 必须登录；失败时抛出 ApiError，由页面决定如何提示/回退。
+ */
+export function parseSelfDisciplineItems({
+  text,
+  today = null,
+  weekday = null,
+  now = null,
+  timezone = null,
+  clientRequestId = null,
+} = {}) {
+  return request('/api/selfdiscipline/parse-items', {
+    method: 'POST',
+    auth: true,
+    timeout: 20000,
+    data: {
+      text,
+      today,
+      weekday,
+      now,
+      timezone,
+      client_request_id: clientRequestId,
+    },
   })
 }

@@ -1,0 +1,384 @@
+// ik-reminder：精确到点的本地通知。
+// AlarmManager.setExactAndAllowWhileIdle + 静态 BroadcastReceiver + NotificationManager。
+// 持久化用 SharedPreferences，进程被杀、重启后仍可重排。
+
+import AlarmManager from 'android.app.AlarmManager'
+import PendingIntent from 'android.app.PendingIntent'
+import Intent from 'android.content.Intent'
+import Context from 'android.content.Context'
+import BroadcastReceiver from 'android.content.BroadcastReceiver'
+import Build from 'android.os.Build'
+import NotificationManager from 'android.app.NotificationManager'
+import Notification from 'android.app.Notification'
+import NotificationChannel from 'android.app.NotificationChannel'
+import PackageManager from 'android.content.pm.PackageManager'
+import Settings from 'android.provider.Settings'
+import Uri from 'android.net.Uri'
+import R from 'android.R'
+import { UTSAndroid } from 'io.dcloud.uts'
+
+const PREFS = 'ik_reminders'
+const KEY_LIST = 'list'
+const EXTRA_ID = 'ik_reminder_id'
+
+// ---------- 持久化 ----------
+
+function prefsOf(ctx: Context) {
+  return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+}
+
+function readAll(ctx: Context): UTSJSONArray<UTSJSONObject> {
+  const raw = prefsOf(ctx).getString(KEY_LIST, '') ?? ''
+  if (raw == '') return [] as UTSJSONArray<UTSJSONObject>
+  let parsed: UTSJSONArray<UTSJSONObject> | null = null
+  try {
+    parsed = JSON.parseArray<UTSJSONObject>(raw)
+  } catch (e) {
+    parsed = null
+  }
+  return parsed ?? ([] as UTSJSONArray<UTSJSONObject>)
+}
+
+function writeAll(ctx: Context, list: UTSJSONArray<UTSJSONObject>) {
+  prefsOf(ctx).edit().putString(KEY_LIST, JSON.stringify(list)).apply()
+}
+
+function findRecord(ctx: Context, id: string): UTSJSONObject | null {
+  const list = readAll(ctx)
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.getString('id') == id) return item
+  }
+  return null
+}
+
+function putRecord(ctx: Context, record: UTSJSONObject) {
+  const list = readAll(ctx)
+  const out = [] as UTSJSONArray<UTSJSONObject>
+  let replaced = false
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.getString('id') == record.getString('id')) {
+      out.push(record)
+      replaced = true
+    } else {
+      out.push(item)
+    }
+  }
+  if (!replaced) out.push(record)
+  writeAll(ctx, out)
+}
+
+function removeRecord(ctx: Context, id: string) {
+  const list = readAll(ctx)
+  const out = [] as UTSJSONArray<UTSJSONObject>
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    if (item.getString('id') != id) out.push(item)
+  }
+  writeAll(ctx, out)
+}
+
+// ---------- 状态 ----------
+
+function notificationsAllowed(ctx: Context): boolean {
+  if (Build.VERSION.SDK_INT < 33) return true
+  const granted = ctx.getPackageManager().checkPermission('android.permission.POST_NOTIFICATIONS', ctx.getPackageName())
+  return granted == PackageManager.PERMISSION_GRANTED
+}
+
+function exactAlarmAllowed(ctx: Context): boolean {
+  if (Build.VERSION.SDK_INT < 31) return true
+  const am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+  return am.canScheduleExactAlarms()
+}
+
+export function getStatus(): UTSJSONObject {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) {
+    return {
+      supported: false,
+      notifications: false,
+      exactAlarm: false,
+      exactAlarmNeeded: false,
+      sdk: 0,
+      vendor: ''
+    }
+  }
+  return {
+    supported: true,
+    notifications: notificationsAllowed(ctx),
+    exactAlarm: exactAlarmAllowed(ctx),
+    exactAlarmNeeded: Build.VERSION.SDK_INT >= 31,
+    sdk: Build.VERSION.SDK_INT,
+    vendor: Build.MANUFACTURER
+  }
+}
+
+export function canScheduleExactAlarms(): boolean {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return false
+  return exactAlarmAllowed(ctx)
+}
+
+export function openNotificationSettings(): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  try {
+    let intent: Intent
+    if (Build.VERSION.SDK_INT >= 26) {
+      intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+      intent.putExtra('android.provider.extra.APP_PACKAGE', ctx.getPackageName())
+    } else {
+      intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+      intent.setData(Uri.parse('package:' + ctx.getPackageName()))
+    }
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+  } catch (e) {
+    console.error('[ik-reminder] openNotificationSettings failed', e)
+  }
+}
+
+/** 运行时通知权限由 JS 层用 plus.android.requestPermissions 申请；这里兜底打开设置页。 */
+export function requestNotificationPermission(): void {
+  openNotificationSettings()
+}
+
+export function openExactAlarmSettings(): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  try {
+    if (Build.VERSION.SDK_INT >= 31) {
+      const intent = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+      intent.setData(Uri.parse('package:' + ctx.getPackageName()))
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+    }
+  } catch (e) {
+    openNotificationSettings()
+  }
+}
+
+// ---------- 闹钟 ----------
+
+function requestCodeOf(id: string): number {
+  return Math.abs(id.hashCode())
+}
+
+function pendingIntentOf(ctx: Context, id: string): PendingIntent {
+  const intent = new Intent(ctx, ReminderReceiver::class.java)
+  intent.putExtra(EXTRA_ID, id)
+  let flags = PendingIntent.FLAG_UPDATE_CURRENT
+  if (Build.VERSION.SDK_INT >= 23) flags = flags | PendingIntent.FLAG_IMMUTABLE
+  return PendingIntent.getBroadcast(ctx, requestCodeOf(id), intent, flags)
+}
+
+function setAlarmWith(ctx: Context, id: string, triggerAt: number): UTSJSONObject {
+  const am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+  const pi = pendingIntentOf(ctx, id)
+  let exact = true
+  let reason = ''
+  try {
+    if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
+      exact = false
+      reason = 'no-exact-permission'
+      am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+    } else {
+      am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+    }
+  } catch (e) {
+    exact = false
+    reason = 'exception'
+    try {
+      am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+    } catch (e2) {
+      return { ok: false, exact: false, reason: 'failed' }
+    }
+  }
+  return { ok: true, exact: exact, reason: reason }
+}
+
+export function schedule(
+  id: string,
+  triggerAt: number,
+  title: string,
+  body: string,
+  kind: string,
+  refId: string
+): UTSJSONObject {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return { ok: false, exact: false, reason: 'no-context' }
+
+  // 同一 id 先取消，保证只有一条。
+  cancel(id)
+
+  putRecord(ctx, {
+    id: id,
+    triggerAt: triggerAt,
+    title: title,
+    body: body,
+    kind: kind,
+    refId: refId
+  })
+
+  return setAlarmWith(ctx, id, triggerAt)
+}
+
+export function cancel(id: string): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  try {
+    const am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    am.cancel(pendingIntentOf(ctx, id))
+    removeRecord(ctx, id)
+  } catch (e) {
+    console.error('[ik-reminder] cancel failed', e)
+  }
+}
+
+export function cancelAll(): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  const list = readAll(ctx)
+  const am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+  for (let i = 0; i < list.length; i++) {
+    const id = list[i].getString('id') ?? ''
+    if (id != '') {
+      try {
+        am.cancel(pendingIntentOf(ctx, id))
+      } catch (e) {}
+    }
+  }
+  writeAll(ctx, [] as UTSJSONArray<UTSJSONObject>)
+}
+
+export function getScheduled(): UTSJSONArray<UTSJSONObject> {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return [] as UTSJSONArray<UTSJSONObject>
+  const list = readAll(ctx)
+  const now = Date.now()
+  const out = [] as UTSJSONArray<UTSJSONObject>
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]
+    const at = item.getNumber('triggerAt') ?? 0
+    if (at > now) out.push(item)
+  }
+  return out
+}
+
+// ---------- 通知 ----------
+
+function channelIdOf(kind: string): string {
+  if (kind == 'focus') return 'sd_focus'
+  if (kind == 'report') return 'sd_report'
+  return 'sd_checkin'
+}
+
+function channelNameOf(kind: string): string {
+  if (kind == 'focus') return '专注结束'
+  if (kind == 'report') return '报备到点'
+  return '每日打卡'
+}
+
+function ensureChannel(ctx: Context, kind: string) {
+  if (Build.VERSION.SDK_INT < 26) return
+  try {
+    const nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    let importance = NotificationManager.IMPORTANCE_DEFAULT
+    if (kind != 'checkin') importance = NotificationManager.IMPORTANCE_HIGH
+    const channel = NotificationChannel(channelIdOf(kind), channelNameOf(kind), importance)
+    channel.enableVibration(true)
+    nm.createNotificationChannel(channel)
+  } catch (e) {}
+}
+
+function launchPendingIntent(ctx: Context): PendingIntent | null {
+  try {
+    const launch = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName())
+    if (launch == null) return null
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    let flags = PendingIntent.FLAG_UPDATE_CURRENT
+    if (Build.VERSION.SDK_INT >= 23) flags = flags | PendingIntent.FLAG_IMMUTABLE
+    return PendingIntent.getActivity(ctx, 0, launch, flags)
+  } catch (e) {
+    return null
+  }
+}
+
+function postNotification(ctx: Context, id: string, title: string, body: string, kind: string) {
+  ensureChannel(ctx, kind)
+  try {
+    const nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    let builder: Notification.Builder
+    if (Build.VERSION.SDK_INT >= 26) {
+      builder = new Notification.Builder(ctx, channelIdOf(kind))
+    } else {
+      builder = new Notification.Builder(ctx)
+      builder.setPriority(Notification.PRIORITY_HIGH)
+      builder.setDefaults(Notification.DEFAULT_ALL)
+    }
+
+    let icon = ctx.getApplicationInfo().icon
+    if (icon == 0) icon = R.drawable.ic_dialog_info
+    builder.setSmallIcon(icon)
+    builder.setContentTitle(title)
+    builder.setContentText(body)
+    builder.setAutoCancel(true)
+
+    const launch = launchPendingIntent(ctx)
+    if (launch != null) builder.setContentIntent(launch)
+
+    const nid = Math.abs(id.hashCode())
+    nm.notify(nid, builder.build())
+  } catch (e) {
+    console.error('[ik-reminder] postNotification failed', e)
+  }
+}
+
+export function postNow(title: string, body: string, kind: string, refId: string): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  const id = kind + ':' + refId + ':' + Date.now().toString()
+  postNotification(ctx, id, title, body, kind)
+}
+
+// ---------- Receiver ----------
+
+export class ReminderReceiver extends BroadcastReceiver {
+  override onReceive(context: Context, intent: Intent) {
+    const id = intent.getStringExtra(EXTRA_ID) ?? ''
+    if (id == '') return
+    const record = findRecord(context, id)
+    if (record != null) {
+      const title = record.getString('title') ?? '提醒'
+      const body = record.getString('body') ?? ''
+      const kind = record.getString('kind') ?? 'focus'
+      postNotification(context, id, title, body, kind)
+    } else {
+      postNotification(context, id, '提醒', '时间到了。', 'focus')
+    }
+    removeRecord(context, id)
+  }
+}
+
+export class BootReceiver extends BroadcastReceiver {
+  override onReceive(context: Context, intent: Intent) {
+    const action = intent.getAction() ?? ''
+    if (action != Intent.ACTION_BOOT_COMPLETED) return
+
+    const list = readAll(context)
+    const out = [] as UTSJSONArray<UTSJSONObject>
+    const now = Date.now()
+    for (let i = 0; i < list.length; i++) {
+      const record = list[i]
+      const at = record.getNumber('triggerAt') ?? 0
+      const id = record.getString('id') ?? ''
+      if (id == '' || at <= now) continue
+      // 未来提醒重新设闹钟；过去的直接丢弃。
+      setAlarmWith(context, id, at)
+      out.push(record)
+    }
+    writeAll(context, out)
+  }
+}

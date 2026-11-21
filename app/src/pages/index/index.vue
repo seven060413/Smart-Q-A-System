@@ -1,39 +1,116 @@
 <template>
-  <view class="page">
-    <!-- 引入侧边栏 -->
-    <Sidebar 
-      :visible="showSidebar" 
+  <view class="tab-root theme-root" :class="{ 'is-dark': isDark }" :style="themeVars">
+    <!-- 主题插件背景图：手机/平板自动选图 -->
+    <ThemeBackground />
+
+    <!-- 引入侧边栏（放在 swiper 外层，抽屉可盖住底部导航） -->
+    <Sidebar
+      :visible="showSidebar"
       :currentMenu="currentMenu"
+      :drag-offset="edgeDrag"
+      :dragging="edgeDragging"
       @close="showSidebar = false"
       @select-menu="onSelectMenu"
     />
 
-    <!-- 自定义导航栏 -->
+    <!-- 左边缘手势区：高于 swiper、低于抽屉，避免和 tab 左右滑动抢手势 -->
+    <view
+      v-if="!showSidebar"
+      class="drawer-edge"
+      @touchstart.stop="onEdgeStart"
+      @touchmove.stop.prevent="onEdgeMove"
+      @touchend.stop="onEdgeEnd"
+      @touchcancel.stop="onEdgeEnd"
+    />
+
+    <!-- 宿主页：item 0 = 学习首页，item 1 = 我的 -->
+    <swiper
+      class="tab-swiper"
+      :current="activeTab"
+      :duration="280"
+      easing-function="easeOutCubic"
+      :disable-touch="showSidebar"
+      @change="onSwiperChange"
+    >
+      <swiper-item class="tab-swiper-item">
+        <view class="page">
+    <!-- 自定义导航栏：无标题，左侧菜单 + 右侧快捷操作 -->
     <view class="topbar" :style="{ paddingTop: statusBarHeight + 'px' }">
-      <view class="topbar-left">
-        <!-- 汉堡菜单按钮 -->
-        <text class="menu-btn" @click="showSidebar = true" aria-label="打开菜单">☰</text>
-        <text class="topbar-title">数学知识问答</text>
+      <view
+        class="topbar-icon-btn"
+        aria-label="打开菜单"
+        @click="showSidebar = true"
+      >
+        <wd-icon name="menu" custom-class="topbar-icon" />
       </view>
-      
+
       <view class="topbar-actions">
         <view
-            class="sound-toggle"
-            :class="{ 'sound-off': !autoPlayEnabled }"
-            @click="toggleAutoPlay"
-          >
-            <text>{{ autoPlayEnabled ? '🔊 声音：开' : '🔇 声音：关' }}</text>
-          </view>
-        <text v-if="store.auth.user" class="topbar-link" @click="newConversation">新对话</text>
-        <!-- 历史链接跳转到历史页面 -->
-        <text v-if="store.auth.user" class="topbar-link" @click="goHistory">历史</text>
-        <!-- 账号链接保持不变 -->
-        <text class="topbar-link" @click="goAuth">{{ store.auth.user ? '账号' : '登录 / 注册' }}</text>
+          v-if="store.auth.user"
+          class="topbar-icon-btn"
+          aria-label="新对话"
+          @click="newConversation"
+        >
+          <wd-icon name="plus" custom-class="topbar-icon topbar-icon--primary" />
+        </view>
+        <view
+          class="topbar-icon-btn"
+          aria-label="语音设置"
+          @click="showVoiceSettings = true"
+        >
+          <wd-icon name="settings" custom-class="topbar-icon" />
+        </view>
+        <view
+          class="topbar-icon-btn"
+          :class="{ 'is-off': !autoPlayEnabled }"
+          :aria-label="autoPlayEnabled ? '关闭自动朗读' : '开启自动朗读'"
+          @click="toggleAutoPlay"
+        >
+          <wd-icon
+            :name="autoPlayEnabled ? 'sound' : 'mute'"
+            custom-class="topbar-icon"
+          />
+        </view>
       </view>
     </view>
 
     <!-- 聊天消息区 -->
     <scroll-view class="chat" scroll-y :scroll-into-view="scrollTo" scroll-with-animation>
+      <!-- 今日建议：错题 / 趋势 / 聊天三路信号，年级只影响排序 -->
+      <view
+        v-if="todaySuggestions.length && !todayDismissed"
+        class="today-card"
+      >
+        <view class="today-head">
+          <view class="today-head-main">
+            <text class="today-title">今日建议</text>
+            <text class="today-sub">根据你的错题、趋势和聊天记录</text>
+          </view>
+          <text class="today-close" @click.stop="dismissTodaySuggestions">×</text>
+        </view>
+        <view class="today-list">
+          <view
+            v-for="item in todaySuggestions"
+            :key="item.node_key || item.kind"
+            class="today-item"
+            @click="openTodaySuggestion(item)"
+          >
+            <view class="today-item-main">
+              <view class="today-item-title">
+                <text class="today-badge" :class="'is-' + item.kind">{{ item.badge }}</text>
+                <text class="today-name">{{ item.name }}</text>
+                <text
+                  v-if="item.grade && todayGrade && item.grade !== todayGrade"
+                  class="today-grade"
+                >{{ gradeLabel(item.grade) }}</text>
+              </view>
+              <text class="today-reason">{{ item.reason }}</text>
+            </view>
+            <text class="today-arrow">›</text>
+          </view>
+        </view>
+      </view>
+
       <!-- 历史消息分页 -->
       <view v-if="hasEarlier" class="load-earlier" @click="loadEarlier">
         {{ loadingEarlier ? '加载中…' : '加载更早的消息' }}
@@ -41,8 +118,18 @@
 
       <!-- 欢迎提示 -->
       <view v-if="messages.length === 0 && !loading && !historyLoading" class="welcome">
-        <text class="welcome-emoji">📚</text>
-        <text class="welcome-text">我是中小学数学助教，问我教材里的知识吧～\n例如：为什么异分母分数相加要先通分</text>
+        <image src="/static/math-assistant.svg" class="welcome-mark" mode="aspectFit" />
+        <text class="welcome-text">我是中小学数学助教，选一个问题开始吧</text>
+        <view class="quick-list">
+          <view
+            v-for="q in quickQuestions"
+            :key="q"
+            class="quick-item"
+            @click="askQuick(q)"
+          >
+            {{ q }}
+          </view>
+        </view>
       </view>
 
       <!-- 消息列表 -->
@@ -59,22 +146,21 @@
               <text v-if="msg.attachment.errorText" class="question-error">{{ msg.attachment.errorText }}</text>
               <button v-if="msg.attachment.statusText === '解答失败'" class="question-retry" :disabled="attachmentBusy" @click="solveMessageAttachment(msg)">重试解答</button>
               <button v-if="msg.attachment.statusText === '上传失败'" class="question-retry" :disabled="attachmentBusy" @click="retryAttachmentUpload(msg)">重新上传</button>
-              <text v-if="typeof msg.attachment.ocr_confidence === 'number' && msg.attachment.ocr_confidence < 0.7" class="ocr-warning">⚠ 识别结果可能有误，请检查数字、分数和运算符</text>
+              <text v-if="typeof msg.attachment.ocr_confidence === 'number' && msg.attachment.ocr_confidence < 0.7" class="ocr-warning">识别结果可能有误，请检查数字、分数和运算符</text>
               <image v-if="msg.attachment.filePath && msg.attachment.mediaType !== 'application/pdf'" :src="msg.attachment.filePath" mode="widthFix" class="question-image" @click="previewMessageAttachment(msg)" />
               <view class="question-file">{{ msg.attachment.name }} · {{ formatBytes(msg.attachment.size) }}<text v-if="msg.attachment.pageCount"> · {{ msg.attachment.pageCount }} 页</text></view>
               <button v-if="msg.attachment.id" class="question-preview" @click="previewMessageAttachment(msg)">{{ msg.attachment.mediaType === 'application/pdf' ? '打开 PDF 文件' : '查看原图' }}</button>
               <view v-if="msg.attachment.failedPages && msg.attachment.failedPages.length" class="question-error">第 {{ msg.attachment.failedPages.join('、') }} 页识别失败，已保留其他页面结果</view>
               <text class="question-label">识别出的题目</text>
-              <textarea v-model="msg.attachment.ocrText" class="question-text" maxlength="20000" placeholder="等待识别或请输入题目" />
+              <textarea v-model="msg.attachment.ocrText" class="question-text" maxlength="20000" placeholder="等待识别或请输入题目" @input="onMessageOcrInput(msg)" />
               <view class="question-actions">
                 <button v-if="msg.attachment.id" :disabled="attachmentBusy" @click="recognizeMessageAttachment(msg)">重新识别</button>
-                <button :disabled="attachmentBusy || !msg.attachment.id || !msg.attachment.ocrText.trim()" @click="solveMessageAttachment(msg)">{{ attachmentBusy ? '正在处理…' : '确认题目并生成解答' }}</button>
+                <button v-if="pendingQuestions.length > 1 && msg.attachment.id && msg.attachment.id === attachment.id" :disabled="attachmentBusy" @click="questionPickerOpen = true">选择题目</button>
+                <button :disabled="attachmentBusy || !msg.attachment.id || !msg.attachment.ocrText.trim()" @click="solveMessageAttachment(msg)">{{ attachmentBusy ? '正在处理…' : '重新生成解答' }}</button>
               </view>
             </view>
             <view v-else class="bubble bubble-user">{{ msg.text }}</view>
           </view>
-          <image v-if="userAvatar" :src="userAvatar" class="message-avatar" mode="aspectFill" />
-          <view v-else class="message-avatar avatar-fallback" aria-label="用户头像"></view>
         </view>
 
         <view v-else class="msg msg-ai">
@@ -83,13 +169,13 @@
             <view class="assistant-name">数学助教</view>
             <view class="bubble bubble-ai">
             <view v-if="msg.failed" class="failed-card">
-              <view class="failed-title">⚠️ 回答生成失败</view>
+              <view class="failed-title">回答生成失败</view>
               <view class="failed-text">{{ msg.error_message || '请稍后重新提问' }}</view>
               <button v-if="msg.retryQuestion" class="retry-btn" @click="retry(msg)">重新提问</button>
             </view>
 
             <view v-else-if="msg.refused" class="refuse-card">
-              <view class="refuse-title">⚠️ {{ msg.answer }}</view>
+              <view class="refuse-title"><MathText :text="msg.answer" inline /></view>
               <view v-if="msg.knowledge_point" class="refuse-closest">最接近知识点：{{ msg.knowledge_point }}</view>
             </view>
 
@@ -99,8 +185,8 @@
                 <view class="head">
                 <text class="chip">{{ msg.knowledge_point }}</text>
                 <text v-if="msg.knowledge_confidence !== undefined" class="confidence">匹配 {{ Math.round(msg.knowledge_confidence * 100) }}%</text>
-                <text class="source">📚 {{ msg.source }}</text>
                 </view>
+                <text v-if="msg.source" class="source">{{ msg.source }}</text>
               </view>
               <view v-if="msg.knowledge_candidates && msg.knowledge_candidates.length" class="candidate-list">
                 <text class="candidate-label">请选择更符合的知识点</text>
@@ -110,7 +196,7 @@
               <!-- 三层折叠：前置知识 -->
               <view class="section" @click="toggle(msg, 'pre')">
                 <view class="section-head">
-                  <text>📖 前置知识</text>
+                  <text>前置知识</text>
                   <text class="arrow">{{ msg.open.pre ? '▾' : '▸' }}</text>
                 </view>
                 <view v-if="msg.open.pre" class="section-body" @click.stop>
@@ -128,7 +214,7 @@
                         @click.stop="openVideo(g, v)"
                       >
                         <view class="video-cover">
-                          <image v-if="v.cover_url" :src="v.cover_url" mode="aspectFill" class="video-cover-img" />
+                          <image v-if="v.cover_url && !v.coverFailed" :src="v.cover_url" mode="aspectFill" class="video-cover-img" referrerpolicy="no-referrer" @error="v.coverFailed = true" />
                           <view v-else class="video-cover-fallback">B站</view>
                           <view class="video-play">▶</view>
                           <text v-if="v.duration_seconds" class="video-duration">{{ formatDuration(v.duration_seconds) }}</text>
@@ -148,7 +234,6 @@
                         <iframe
                           :src="activeVideo.embed_url"
                           class="video-iframe"
-                          allowfullscreen="true"
                           allow="autoplay; fullscreen; picture-in-picture"
                           referrerpolicy="no-referrer-when-downgrade"
                           frameborder="0"
@@ -166,11 +251,56 @@
 
                     <view v-else-if="g.videosLoaded" class="video-empty-row">
                       <text class="video-empty">暂无审核通过的视频</text>
-                      <text class="video-retry" @click.stop="loadVideos(msg)">刷新</text>
+                      <text class="video-retry" @click.stop="loadVideos(msg, true)">刷新</text>
                     </view>
                   </view>
 
-                  <text v-if="msg.prerequisite_gaps.length === 0" class="empty">无</text>
+                  <!-- 本体视频讲解：当前知识点自身的视频（前置 gap 不一定有视频） -->
+                  <view v-if="msg.bodyVideos && msg.bodyVideos.length" class="video-list body-video-list">
+                    <text class="video-section-label">本体视频讲解</text>
+                    <view
+                      v-for="(v, k) in msg.bodyVideos"
+                      :key="v.video_id"
+                      class="video-card"
+                      @click.stop="openVideo({ id: msg.learning_path.body_id }, v)"
+                    >
+                      <view class="video-cover">
+                        <image v-if="v.cover_url && !v.coverFailed" :src="v.cover_url" mode="aspectFill" class="video-cover-img" referrerpolicy="no-referrer" @error="v.coverFailed = true" />
+                        <view v-else class="video-cover-fallback">B站</view>
+                        <view class="video-play">▶</view>
+                        <text v-if="v.duration_seconds" class="video-duration">{{ formatDuration(v.duration_seconds) }}</text>
+                      </view>
+                      <view class="video-meta">
+                        <text class="video-title">{{ v.title }}</text>
+                        <text class="video-author">{{ v.author || 'B 站' }}</text>
+                      </view>
+                    </view>
+
+                    <!-- #ifdef H5 -->
+                    <view
+                      v-if="activeVideo && activeVideo.node_key === msg.learning_path.body_id"
+                      class="video-player"
+                      @click.stop
+                    >
+                      <iframe
+                        :src="activeVideo.embed_url"
+                        class="video-iframe"
+                        allow="autoplay; fullscreen; picture-in-picture"
+                        referrerpolicy="no-referrer-when-downgrade"
+                        frameborder="0"
+                      ></iframe>
+                      <view class="video-actions">
+                        <text class="video-action" @click.stop="closeVideo">收起播放器</text>
+                        <text class="video-action" @click.stop="openMobilePlayer(activeVideo)">移动版播放器</text>
+                        <text class="video-action" @click.stop="openWatchPage(activeVideo)">在 B 站打开</text>
+                      </view>
+                      <text v-if="!h264Supported" class="video-hint warn">当前浏览器缺少 H.264 解码能力，请改用 Chrome/Edge，或点“在 B 站打开”。</text>
+                      <text class="video-hint">若提示“不支持 HTML5 播放器”，请点“移动版播放器”或“在 B 站打开”。</text>
+                    </view>
+                    <!-- #endif -->
+                  </view>
+
+                  <text v-if="msg.prerequisite_gaps.length === 0 && !(msg.bodyVideos && msg.bodyVideos.length)" class="empty">无前置知识</text>
                   <text v-if="msg.videosNoIds" class="video-empty">当前消息缺少知识点编号，请重新提问或刷新页面</text>
                   <text v-if="msg.videosError" class="video-empty">视频加载失败，重新展开可重试</text>
                 </view>
@@ -179,19 +309,9 @@
               <!-- 解题过程 -->
               <view class="section answer-section" @click="toggle(msg, 'body')">
                 <view class="section-head">
-                  <text>🧩 解题过程</text>
+                  <text>解题过程</text>
 
-                  <view class="section-head-right">
-                    <button
-                      class="tts-btn"
-                      :class="{ 'tts-playing': playingIndex === i }"
-                      @click.stop="playTTS(getSpeechText(msg), i)"
-                    >
-                      {{ playingIndex === i ? '⏹ 停止朗读' : '🔊 朗读答案' }}
-                    </button>
-
-                    <text class="arrow">{{ msg.open.body ? '▾' : '▸' }}</text>
-                  </view>
+                  <text class="arrow">{{ msg.open.body ? '▾' : '▸' }}</text>
                 </view>
 
                 <view v-if="msg.open.body" class="section-body">
@@ -202,11 +322,13 @@
                   >
                     <view class="solution-step-head">
                       <text class="solution-step-no">{{ stepIndex + 1 }}</text>
-                      <text class="solution-step-title">
-                        {{ step.title || `第 ${stepIndex + 1} 步` }}
-                      </text>
+                      <MathText
+                        class="solution-step-title"
+                        :text="step.title || `第 ${stepIndex + 1} 步`"
+                        inline
+                      />
                     </view>
-                    <text class="solution-step-content">{{ step.content }}</text>
+                    <MathText class="solution-step-content" :text="step.content" />
                   </view>
 
     <view
@@ -214,9 +336,17 @@
       class="final-answer"
     >
       <text class="final-label">最终答案</text>
-      <text class="final-text">
-        {{ msg.final_answer || finalAnswer(msg.answer) }}
-      </text>
+      <MathText class="final-text" :text="msg.final_answer || finalAnswer(msg.answer)" />
+    </view>
+
+    <view class="answer-actions">
+      <button
+        class="tts-btn"
+        :class="{ 'tts-playing': playingIndex === i }"
+        @click.stop="playTTS(getSpeechText(msg), i)"
+      >
+        {{ playingIndex === i ? '停止朗读' : '朗读答案' }}
+      </button>
     </view>
   </view>
 </view>
@@ -224,7 +354,7 @@
               <!-- 三层折叠：巩固练习 -->
               <view class="section" @click="toggle(msg, 'cons')">
                 <view class="section-head">
-                  <text>✏️ 巩固练习</text>
+                  <text>巩固练习</text>
                   <text class="section-count">{{ exerciseCount(msg) ? `有 ${exerciseCount(msg)} 道巩固练习` : '暂无巩固练习' }}</text>
                   <text class="arrow">{{ msg.open.cons ? '▾' : '▸' }}</text>
                 </view>
@@ -232,7 +362,7 @@
                   <template v-if="exerciseCount(msg)">
                     <view v-for="(ex, j) in (msg.exercises && msg.exercises.length ? msg.exercises : msg.learning_path.exercises)" :key="j" class="exercise">
                       <text class="exercise-no">第 {{ j + 1 }} 题</text>
-                      <text class="exercise-text">{{ ex }}</text>
+                      <MathText class="exercise-text" :text="ex" />
                     </view>
                   </template>
                   <template v-else-if="msg.learning_path.consolidation.length">
@@ -245,7 +375,7 @@
                 </view>
               </view>
 
-                <button class="path-btn" @click="goPath(msg)">🗺 查看学习路径</button>
+                <button class="path-btn" @click="goPath(msg)">查看学习路径</button>
             </template>
             </view>
           </view>
@@ -265,15 +395,6 @@
 
     <!-- 底部输入区 -->
     <view class="composer">
-      <view class="record-row">
-        <template v-if="voiceSupported && recordState === 'recording'">
-          <text class="record-text">正在录音 · {{ recordSeconds }}s</text>
-          <text class="record-cancel" @click="cancelRecord">取消</text>
-        </template>
-        <text v-else-if="voiceSupported && recordState === 'uploading'" class="record-text subtle">正在识别…</text>
-        <text v-else-if="voiceSupported && recordStarting" class="record-text subtle">正在准备…</text>
-      </view>
-
       <view v-if="attachment.filePath && !attachmentMessage" class="attachment-draft">
         <view v-if="attachment.mediaType === 'application/pdf'" class="attachment-thumb attachment-pdf">PDF</view>
         <image v-else :src="attachment.filePath" mode="aspectFill" class="attachment-thumb" @click="previewDraftAttachment" />
@@ -283,11 +404,11 @@
         </view>
         <button class="attachment-remove" :disabled="attachmentBusy" aria-label="删除图片" @click="clearAttachment">×</button>
       </view>
-      <view v-if="attachment.id" class="attachment-text-editor">
+      <view v-if="attachment.id && !attachmentMessage" class="attachment-text-editor">
         <textarea v-model="attachment.ocrText" maxlength="20000" placeholder="请核对或修改识别出的题目" @input="syncOcrText" />
         <view class="attachment-actions">
           <button :disabled="attachmentBusy" @click="recognizeAttachment">重新识别</button>
-          <button :disabled="attachmentBusy || !attachment.ocrText.trim()" @click="solveAttachment">提交题目</button>
+          <button :disabled="attachmentBusy || !attachment.ocrText.trim()" @click="solveAttachment">重新生成解答</button>
         </view>
       </view>
       <view class="input-bar">
@@ -304,10 +425,17 @@
         <button
           v-if="voiceSupported"
           class="voice-btn"
-          :class="[recordState, { starting: recordStarting }]"
-          :disabled="loading || recordStarting || recordState === 'uploading'"
-          aria-label="语音输入"
-          @click="toggleRecord"
+          :class="[recordState, { starting: recordStarting, 'will-cancel': voiceWillCancel }]"
+          :disabled="loading || recordState === 'uploading'"
+          aria-label="按住说话，松开发送"
+          @touchstart.stop.prevent="onVoiceStart"
+          @touchmove.stop.prevent="onVoiceMove"
+          @touchend.stop.prevent="onVoiceEnd"
+          @touchcancel.stop.prevent="onVoiceCancel"
+          @mousedown.stop.prevent="onVoiceStart"
+          @mousemove.stop.prevent="onVoiceMove"
+          @mouseup.stop.prevent="onVoiceEnd"
+          @mouseleave="onVoiceMouseLeave"
         >
           <svg class="voice-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <g
@@ -327,48 +455,164 @@
         <button
           class="plus-btn"
           :disabled="loading || attachmentBusy || recordStarting || recordState !== 'idle'"
-          aria-label="添加图片题目"
+          aria-label="添加题目"
           @click="toggleAttachmentMenu"
-        >＋</button>
+        >
+          <svg class="plus-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              d="M12 5v14M5 12h14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
         <button
           class="send-btn"
           :disabled="loading || attachmentBusy || (!question && (!attachment.filePath || attachment.id)) || recordStarting || recordState !== 'idle'"
           @click="send"
         >发送</button>
       </view>
-      <view v-if="attachment.menuOpen" class="attachment-menu">
-        <view class="attachment-menu-item" @click="chooseAttachment('album')">
-          <view class="attachment-menu-icon">
-            <text class="ami-icon">🖼️</text>
-          </view>
-          <text class="ami-label">相册</text>
+    </view>
+
         </view>
-        <view class="attachment-menu-item" @click="chooseAttachment('camera')">
-          <view class="attachment-menu-icon">
-            <text class="ami-icon">📷</text>
-          </view>
-          <text class="ami-label">拍照</text>
-        </view>
-        <view class="attachment-menu-item" @click="choosePdf">
-          <view class="attachment-menu-icon">
-            <text class="ami-icon">📄</text>
-          </view>
-          <text class="ami-label">文件</text>
+      </swiper-item>
+
+      <!-- 顺序必须是：0 学习 / 1 自律 / 2 我的 -->
+      <swiper-item class="tab-swiper-item">
+        <SelfDisciplineView :refresh-key="sdRefresh" />
+      </swiper-item>
+
+      <swiper-item class="tab-swiper-item">
+        <MyView :refresh-key="myRefresh" />
+      </swiper-item>
+    </swiper>
+
+    <AppTabBar :active="activePath" @change="onTabbarChange" />
+
+    <!-- 按住说话浮层：放在 swiper 外层，避免被 transform 裁剪；pointer-events 关闭，不拦截触摸 -->
+    <view
+      v-if="recordStarting || recordState === 'starting' || recordState === 'recording' || recordState === 'uploading'"
+      class="voice-overlay"
+    >
+      <view class="voice-overlay-card" :class="{ 'is-cancel': voiceWillCancel }">
+        <text class="voice-overlay-title">{{ voiceOverlayTitle }}</text>
+        <text class="voice-overlay-hint">{{ voiceOverlayHint }}</text>
+        <text v-if="recordState === 'recording'" class="voice-overlay-time">{{ recordSeconds }}s</text>
+        <view v-if="recordState === 'recording'" class="voice-wave" :class="{ 'is-cancel': voiceWillCancel }">
+          <view v-for="n in 5" :key="n" class="voice-wave-bar" :style="{ animationDelay: `${n * 0.12}s` }"></view>
         </view>
       </view>
     </view>
 
-    <AppTabBar :active="TAB_INDEX" />
+    <!-- 附件选择：底部弹层（放在 swiper 外层，避免被 swiper 的 transform 裁剪） -->
+    <wd-popup
+      v-model="attachment.menuOpen"
+      position="bottom"
+      round
+      safe-area-inset-bottom
+      :z-index="1100"
+    >
+      <view class="attach-sheet">
+        <view class="attach-sheet__handle" />
+        <view class="attach-sheet__head">
+          <text class="attach-sheet__title">添加题目</text>
+          <text class="attach-sheet__sub">支持 JPG / PNG / PDF，单个不超过 20 MB</text>
+        </view>
+
+        <view class="attach-grid">
+          <view class="attach-item" @click="chooseAttachment('album')">
+            <view class="attach-item__icon">
+              <wd-icon name="image" custom-class="attach-icon" />
+            </view>
+            <text class="attach-item__label">相册</text>
+          </view>
+          <view class="attach-item" @click="chooseAttachment('camera')">
+            <view class="attach-item__icon">
+              <wd-icon name="camera" custom-class="attach-icon" />
+            </view>
+            <text class="attach-item__label">拍照</text>
+          </view>
+          <view class="attach-item" @click="choosePdf">
+            <view class="attach-item__icon">
+              <wd-icon name="file" custom-class="attach-icon" />
+            </view>
+            <text class="attach-item__label">文件</text>
+          </view>
+        </view>
+
+        <view class="attach-cancel" @click="attachment.menuOpen = false">取消</view>
+      </view>
+    </wd-popup>
+
+    <!-- 语音设置：松手后直接发送 / 先确认 -->
+    <wd-popup
+      v-model="showVoiceSettings"
+      position="bottom"
+      round
+      safe-area-inset-bottom
+      :z-index="1100"
+    >
+      <view class="voice-settings">
+        <view class="voice-settings__head">
+          <text class="voice-settings__title">语音设置</text>
+          <text class="voice-settings__close" @click="showVoiceSettings = false">关闭</text>
+        </view>
+        <view class="voice-settings__row">
+          <view class="voice-settings__copy">
+            <text class="voice-settings__label">语音识别后先确认</text>
+            <text class="voice-settings__desc">关闭：松手识别完直接发送；开启：先填入输入框，确认后再发送。</text>
+          </view>
+          <switch :checked="voiceConfirmBeforeSend" color="#2b6cb0" @change="onVoiceConfirmChange" />
+        </view>
+      </view>
+    </wd-popup>
+
+    <!-- 多题选择：识别到多道题时让用户选一道 -->
+    <wd-popup
+      v-model="questionPickerOpen"
+      position="bottom"
+      round
+      safe-area-inset-bottom
+      :z-index="1100"
+    >
+      <view class="question-picker">
+        <view class="question-picker__head">
+          <text class="question-picker__title">识别到 {{ pendingQuestions.length }} 道题</text>
+          <text class="question-picker__sub">请选择要解答的一道</text>
+        </view>
+        <scroll-view scroll-y class="question-picker__list">
+          <view
+            v-for="(q, index) in pendingQuestions"
+            :key="index"
+            class="question-picker__item"
+            @click="chooseQuestion(index)"
+          >
+            <text class="question-picker__index">第 {{ index + 1 }} 题</text>
+            <MathText class="question-picker__text" :text="q" />
+          </view>
+        </scroll-view>
+        <view class="question-picker__cancel" @click="questionPickerOpen = false">先不解答</view>
+      </view>
+    </wd-popup>
   </view>
 </template>
 
 <script setup>
 import { computed, reactive, ref, watch,nextTick } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
-import { askQuestion, attachmentAction, attachmentContent, attachmentStatus, deleteAttachment, listMessages, listVideos, transcribeAudio, uploadAttachment } from '../../api.js'
+import { askQuestion, attachmentAction, attachmentContent, attachmentStatus, deleteAttachment, getTodayRecommendations, listMessages, listVideos, transcribeAudio, uploadAttachment } from '../../api.js'
 import AppTabBar from '../../components/AppTabBar.vue'
-import Sidebar from './Sidebar.vue' 
-import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
+import MyView from '../../components/my/MyView.vue'
+import SelfDisciplineView from '../../components/selfdiscipline/SelfDisciplineView.vue'
+import MathText from '../../components/ui/MathText.vue'
+import Sidebar from './Sidebar.vue'
+import { splitLinesOutsideMath, textToSpeech } from '../../math/latex.js'
+import { splitQuestionText } from '../../question-split.js'
+import { cropSession, resetCropSession } from '../../crop-session.js'
+import { TAB_ITEMS, tabIndexByPath, tabPathByIndex } from '../../tabbar.js'
+import { isDark, themeVars } from '../../theme/theme.js'
 import { store } from '../../store.js'
 import { BASE_URL } from '../../config.js'
 import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
@@ -461,7 +705,7 @@ function getSpeechText(msg) {
     parts.push(raw)
   }
 
-  return parts.join('。').replace(/\s+/g, ' ').trim()
+  return textToSpeech(parts.join('。').replace(/\s+/g, ' ').trim())
 }
 
 /**
@@ -608,6 +852,86 @@ function cleanTTSContent(text) {
 const showSidebar = ref(false)
 const currentMenu = ref('study')
 
+// ==================== 左边缘滑出抽屉 ====================
+// 手指从左边缘向右拖，抽屉跟随手指移动；松手过阈值则展开。
+const edgeDrag = ref(0)       // 当前拖动距离（px）
+const edgeDragging = ref(false)
+let edgeStartX = 0
+let edgeStartY = 0
+let edgeStartedAt = 0
+let edgeAxisLocked = false
+
+function drawerWidthPx() {
+  try {
+    const width = uni.getSystemInfoSync().windowWidth || 375
+    return Math.min(width * 0.76, 320)
+  } catch (e) {
+    return 280
+  }
+}
+
+function onEdgeStart(e) {
+  const t = e.touches && e.touches[0]
+  if (!t) return
+  edgeStartX = t.clientX
+  edgeStartY = t.clientY
+  edgeStartedAt = Date.now()
+  edgeAxisLocked = false
+  edgeDrag.value = 0
+  edgeDragging.value = true
+}
+
+function onEdgeMove(e) {
+  if (!edgeDragging.value) return
+  const t = e.touches && e.touches[0]
+  if (!t) return
+  const dx = t.clientX - edgeStartX
+  const dy = t.clientY - edgeStartY
+  if (!edgeAxisLocked) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+    // 判定为竖向手势时放弃，交还页面滚动
+    if (Math.abs(dy) > Math.abs(dx)) {
+      edgeDragging.value = false
+      edgeDrag.value = 0
+      return
+    }
+    edgeAxisLocked = true
+  }
+  edgeDrag.value = Math.max(0, Math.min(dx, drawerWidthPx()))
+}
+
+function onEdgeEnd() {
+  if (!edgeDragging.value) return
+  const width = drawerWidthPx()
+  const threshold = Math.max(56, width * 0.25)
+  const fast = Date.now() - edgeStartedAt < 220
+  const shouldOpen = edgeDrag.value > threshold || (fast && edgeDrag.value > 24)
+  edgeDragging.value = false
+  edgeDrag.value = 0
+  if (shouldOpen) showSidebar.value = true
+}
+
+// ==================== 宿主页 tab 状态 ====================
+// 0 = 学习首页，1 = 自律，2 = 我的；底部导航只发事件，真正切页由 swiper 的 current 控制
+const activeTab = ref(0)
+const myRefresh = ref(0)
+const sdRefresh = ref(0)
+const activePath = computed(() => tabPathByIndex(activeTab.value))
+
+function onSwiperChange(e) {
+  activeTab.value = e.detail.current
+}
+
+function onTabbarChange(path) {
+  activeTab.value = tabIndexByPath(path)
+}
+
+// 切到自律/我的时重新读取数据
+watch(activeTab, (v) => {
+  if (v === 1) sdRefresh.value++
+  if (v === 2) myRefresh.value++
+})
+
 // 状态栏高度（自定义导航栏适配）
 const statusBarHeight = ref(0)
 // #ifdef H5
@@ -656,7 +980,7 @@ function answerStepList(msg) {
     } catch (e) {}
   }
   const clean = text.replace(/(?:最终答案|答案)\s*[:：].*$/is, '').trim()
-  return clean.split(/\n+/).map((line, index) => ({ title: `第 ${index + 1} 步`, content: line.replace(/^\s*\d+[.、)）]\s*/, '') })).filter((step) => step.content)
+  return splitLinesOutsideMath(clean).map((line, index) => ({ title: `第 ${index + 1} 步`, content: line.replace(/^\s*\d+[.、)）]\s*/, '') })).filter((step) => step.content)
 }
 
 function finalAnswer(answer) {
@@ -678,12 +1002,20 @@ function finalAnswer(answer) {
 function onSelectMenu(menu) {
   currentMenu.value = menu.key
   showSidebar.value = false
-  
-  if (menu.key === 'history') {
-    goHistory()
+
+  if (menu.key === 'study') {
+    activeTab.value = 0
+  } else if (menu.key === 'self') {
+    activeTab.value = 1
   } else if (menu.key === 'profile') {
-    goAuth()
-  } else if (menu.key !== 'study') {
+    activeTab.value = 2
+  } else if (menu.key === 'history') {
+    goHistory()
+  } else if (menu.key === 'diagnosis') {
+    uni.navigateTo({ url: '/pages/diagnosis/diagnosis' })
+  } else if (menu.key === 'path') {
+    uni.navigateTo({ url: '/pages/path/path' })
+  } else {
     uni.showToast({ title: `即将开发：${menu.name}`, icon: 'none' })
   }
 }
@@ -691,6 +1023,112 @@ function onSelectMenu(menu) {
 const question = ref('')
 const loading = ref(false)
 const attachmentBusy = ref(false)
+
+// 空状态快捷提问
+const quickQuestions = [
+  '分数为什么要通分？',
+  '圆的面积怎么算？',
+  '一元一次方程怎么解？',
+]
+
+function askQuick(text) {
+  if (loading.value || attachmentBusy.value || recordStarting.value || recordState.value !== 'idle') return
+  question.value = text
+  send()
+}
+
+// ---------- 今日建议 ----------
+const GRADE_LABELS = {
+  1: '一年级',
+  2: '二年级',
+  3: '三年级',
+  4: '四年级',
+  5: '五年级',
+  6: '六年级',
+  7: '七年级',
+  8: '八年级',
+  9: '九年级',
+}
+const todaySuggestions = ref([])
+const todayLoading = ref(false)
+const todayDismissed = ref(false)
+const todayGrade = computed(() =>
+  Number.isInteger(store.auth.user && store.auth.user.grade)
+    ? store.auth.user.grade
+    : null
+)
+
+function gradeLabel(value) {
+  return GRADE_LABELS[value] || `${value}年级`
+}
+
+function todayStorageKey() {
+  const date = new Date()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+function readTodayDismissed() {
+  try {
+    return uni.getStorageSync('today_suggestions_dismissed') === todayStorageKey()
+  } catch (e) {
+    return false
+  }
+}
+
+function dismissTodaySuggestions() {
+  todayDismissed.value = true
+  try {
+    uni.setStorageSync('today_suggestions_dismissed', todayStorageKey())
+  } catch (e) {
+    // 本地缓存不可用时只在本次页面生效。
+  }
+}
+
+async function loadTodaySuggestions() {
+  if (!(store.auth.user && store.auth.token)) {
+    todaySuggestions.value = []
+    return
+  }
+  if (todayDismissed.value) return
+  todayLoading.value = true
+  try {
+    const data = await getTodayRecommendations({ limit: 3 })
+    todaySuggestions.value = (data && data.items) || []
+  } catch (e) {
+    todaySuggestions.value = []
+  } finally {
+    todayLoading.value = false
+  }
+}
+
+function openTodaySuggestion(item) {
+  const action = (item.actions || [])[0]
+  if (!action) return
+  if (action.type === 'diagnose') {
+    const query = item.node_key
+      ? `?node_key=${encodeURIComponent(item.node_key)}`
+      : ''
+    uni.navigateTo({ url: `/pages/diagnosis/diagnosis${query}` })
+    return
+  }
+  if (action.type === 'chat') {
+    question.value = action.question || `帮我讲讲「${item.name}」`
+    uni.showToast({ title: '已填入输入框', icon: 'none' })
+    return
+  }
+  if (action.type === 'video' && action.video) {
+    uni.navigateTo({
+      url: `/pages/video/video?bvid=${encodeURIComponent(action.video.bvid || '')}`
+        + `&page=${encodeURIComponent(action.video.page || 1)}`
+        + `&aid=${encodeURIComponent(action.video.aid || '')}`
+        + `&cid=${encodeURIComponent(action.video.cid || '')}`
+        + `&title=${encodeURIComponent(action.video.title || item.name)}`,
+    })
+  }
+}
+
 const attachment = reactive({
   filePath: '', file: null, name: '', size: 0, id: '', ocrText: '', statusText: '', menuOpen: false, mediaType: '', pageCount: 0, failedPages: [],
 })
@@ -714,12 +1152,38 @@ const recordState = ref('idle')
 const recordSeconds = ref(0)
 const recordStarting = ref(false)
 const voiceSupported = ref(false)
+const voiceWillCancel = ref(false)
+const showVoiceSettings = ref(false)
+const voiceConfirmBeforeSend = ref(false)
+const questionPickerOpen = ref(false)
+const pendingQuestions = ref([])
+let voiceStartY = 0
 let recorder = null
 let recordTimer = null
 let pendingCancel = false
 let pendingStart = false
 let recordSession = 0
 let activeRecordSession = 0
+
+try {
+  voiceConfirmBeforeSend.value = !!uni.getStorageSync('voice_confirm_before_send')
+} catch (e) {}
+
+const voiceOverlayTitle = computed(() => {
+  if (recordState.value === 'uploading') return '正在识别…'
+  if (recordStarting.value || recordState.value === 'starting') return '正在准备…'
+  if (voiceWillCancel.value) return '松开取消'
+  return '松开发送'
+})
+
+const voiceOverlayHint = computed(() => {
+  if (recordState.value === 'uploading') {
+    return voiceConfirmBeforeSend.value ? '识别完成后先填入输入框' : '识别完成后自动发送'
+  }
+  if (recordStarting.value || recordState.value === 'starting') return '请保持按住'
+  if (voiceWillCancel.value) return '已进入取消区域'
+  return '上滑取消'
+})
 
 // #ifdef APP-PLUS
 voiceSupported.value = true
@@ -830,6 +1294,7 @@ function invalidateRecordSession() {
   recordSession += 1
   pendingCancel = true
   pendingStart = false
+  recordStarting.value = false
   stopRecordTimer()
   if (recordState.value === 'recording') stopCurrentRecording()
   releaseH5Resources()
@@ -1137,9 +1602,14 @@ async function finishH5Recording(session, sessionChunks, stream, detectedType) {
     resetRecordState()
     return
   }
-  if (!chunks.length || recordedSeconds * 1000 < 500) {
+  if (!chunks.length) {
     resetRecordState()
     uni.showToast({ title: '没有录到有效语音', icon: 'none' })
+    return
+  }
+  if (recordedSeconds * 1000 < 500) {
+    resetRecordState()
+    uni.showToast({ title: '按住说话，松开发送', icon: 'none' })
     return
   }
 
@@ -1174,19 +1644,6 @@ async function finishH5Recording(session, sessionChunks, stream, detectedType) {
   uploadRecording(null, session, { file })
 }
 // #endif
-
-function toggleRecord() {
-  if (!voiceSupported.value) {
-    uni.showToast({ title: '当前平台不支持语音输入', icon: 'none' })
-    return
-  }
-  if (recordState.value === 'recording') {
-    stopCurrentRecording()
-    return
-  }
-  if (recordState.value === 'uploading' || pendingStart || recordStarting.value) return
-  startRecording()
-}
 
 async function startRecording() {
   if (loading.value) {
@@ -1230,7 +1687,8 @@ function beginAppRecording() {
   activeRecordSession = recordSession
   pendingCancel = false
   recordSeconds.value = 0
-  recordState.value = 'recording'
+  // 真正的 recording 状态等 recorder.onStart 再切，避免“已松手但录音还没启动”的竞态
+  recordState.value = 'starting'
   try {
     recorder.start({
       format: 'mp3',
@@ -1250,6 +1708,115 @@ function cancelRecord() {
   stopCurrentRecording()
 }
 
+// ==================== 按住说话 ====================
+
+function onVoiceStart(e) {
+  if (!voiceSupported.value) {
+    uni.showToast({ title: '当前平台不支持语音输入', icon: 'none' })
+    return
+  }
+  if (loading.value || attachmentBusy.value) {
+    uni.showToast({
+      title: loading.value ? '回答生成中，请稍后' : '附件处理中，请稍后',
+      icon: 'none',
+    })
+    return
+  }
+  if (attachment.filePath && !attachment.id) {
+    uni.showToast({ title: '请先发送或删除当前附件', icon: 'none' })
+    return
+  }
+  if (recordState.value !== 'idle' || pendingStart || recordStarting.value) return
+
+  const point = (e.touches && e.touches[0]) || e
+  voiceStartY = (point && (point.clientY != null ? point.clientY : point.pageY)) || 0
+  voiceWillCancel.value = false
+  try {
+    uni.vibrateShort({ type: 'light' })
+  } catch (err) {}
+  startRecording()
+}
+
+function onVoiceMove(e) {
+  if (recordState.value !== 'recording' && !recordStarting.value && recordState.value !== 'starting') return
+  const point = (e.touches && e.touches[0]) || e
+  if (!point) return
+  const y = point.clientY != null ? point.clientY : point.pageY
+  if (typeof y !== 'number') return
+
+  const next = voiceStartY - y > 80
+  if (next !== voiceWillCancel.value) {
+    voiceWillCancel.value = next
+    try {
+      uni.vibrateShort({ type: next ? 'heavy' : 'light' })
+    } catch (err) {}
+  }
+}
+
+function onVoiceEnd() {
+  // 权限弹窗/录音启动还没完成时松手：直接取消，不发送
+  if (recordStarting.value || pendingStart || recordState.value === 'starting') {
+    voiceWillCancel.value = false
+    invalidateRecordSession()
+    return
+  }
+  if (recordState.value !== 'recording') return
+
+  if (voiceWillCancel.value) {
+    cancelRecord()
+  } else {
+    stopCurrentRecording()
+  }
+  voiceWillCancel.value = false
+}
+
+function onVoiceCancel() {
+  voiceWillCancel.value = false
+  if (recordState.value === 'recording' || recordState.value === 'starting' || recordStarting.value) {
+    invalidateRecordSession()
+  }
+}
+
+function onVoiceMouseLeave() {
+  if (recordState.value === 'recording') {
+    uni.showToast({ title: '已取消录音', icon: 'none' })
+    onVoiceCancel()
+  }
+}
+
+function onVoiceConfirmChange(e) {
+  const value = !!(e && e.detail && e.detail.value)
+  voiceConfirmBeforeSend.value = value
+  try {
+    uni.setStorageSync('voice_confirm_before_send', value)
+  } catch (err) {}
+}
+
+/**
+ * 语音识别完成后的落点：
+ * - 默认直接发送
+ * - 开启“先确认”时填入输入框，等用户点发送
+ */
+function submitVoiceText(text) {
+  const current = question.value.trim()
+  const finalText = current ? `${current} ${text}` : text
+
+  if (voiceConfirmBeforeSend.value) {
+    question.value = finalText
+    uni.showToast({ title: '识别完成，请确认后发送', icon: 'none' })
+    return
+  }
+
+  question.value = finalText
+  if (loading.value || attachmentBusy.value) {
+    uni.showToast({ title: '当前正在处理，已填入输入框', icon: 'none' })
+    return
+  }
+
+  resetRecordState()
+  send()
+}
+
 function uploadRecording(filePath, session, options = {}) {
   recordState.value = 'uploading'
   transcribeAudio(filePath, options)
@@ -1260,12 +1827,7 @@ function uploadRecording(filePath, session, options = {}) {
         uni.showToast({ title: '未识别到有效语音，请重试', icon: 'none' })
         return
       }
-      const current = question.value.trim()
-      question.value = current ? `${current} ${text}` : text
-      uni.showToast({
-        title: current ? '已追加识别结果，请确认' : '识别完成，请确认后发送',
-        icon: 'none',
-      })
+      submitVoiceText(text)
     })
     .catch((e) => {
       if (session !== recordSession) return
@@ -1311,7 +1873,7 @@ if (recorder) {
     const durationMs = (res && res.duration) || recordedSeconds * 1000
     if (durationMs < 500) {
       resetRecordState()
-      uni.showToast({ title: '没有录到有效语音', icon: 'none' })
+      uni.showToast({ title: '按住说话，松开发送', icon: 'none' })
       return
     }
 
@@ -1591,7 +2153,11 @@ function retry(msg) {
 }
 
 onLoad((options) => {
-  hideNativeTabBar()
+  // 外部 reLaunch 时通过 ?tab=N 打开对应 tab：0 学习 / 1 自律 / 2 我的
+  const tab = Number(options && options.tab)
+  if (Number.isInteger(tab) && tab >= 0 && tab < TAB_ITEMS.length) {
+    activeTab.value = tab
+  }
 
   if (options && options.conversation_id) {
     const conversationId = options.conversation_id
@@ -1618,11 +2184,20 @@ onLoad((options) => {
 })
 
 onShow(() => {
-  hideNativeTabBar()
+  // 从裁切页返回：消费裁切结果并直接上传解答
+  consumeCropResult()
 
   // 每次页面显示，重新读取最新缓存昵称
   const savedNickname = uni.getStorageSync('custom_nickname')
   currentNickname.value = savedNickname || ''
+
+  // 从子页面返回后刷新“自律”与“我的”
+  sdRefresh.value++
+  myRefresh.value++
+
+  // 每天首次进入刷新今日建议；从诊断/编辑资料返回时也会重新计算。
+  todayDismissed.value = readTodayDismissed()
+  loadTodaySuggestions()
 
   const action = store.pendingIndexAction
   if (action) {
@@ -1645,6 +2220,26 @@ onShow(() => {
     loadConversation(activeId)
   }
 })
+
+// 启动时若 onShow 早于登录校验完成，等 ready 后再拉一次。
+watch(
+  () => store.auth.ready,
+  (ready) => {
+    if (ready) loadTodaySuggestions()
+  }
+)
+
+// 登录/退出后立即刷新或清空，避免看到上一位学生的建议。
+watch(
+  () => store.auth.token,
+  (token) => {
+    if (!token) {
+      todaySuggestions.value = []
+      return
+    }
+    loadTodaySuggestions()
+  }
+)
 
 function scrollBottom() {
   scrollTo.value = ''
@@ -1741,6 +2336,8 @@ function clearAttachment() {
   if (attachment.id) deleteAttachment(attachment.id).catch(() => {})
   Object.assign(attachment, { filePath: '', file: null, name: '', size: 0, id: '', ocrText: '', statusText: '', menuOpen: false, mediaType: '', pageCount: 0, failedPages: [] })
   attachmentMessage.value = null
+  pendingQuestions.value = []
+  questionPickerOpen.value = false
 }
 
 function choosePdf() {
@@ -1770,17 +2367,59 @@ function choosePdf() {
   }
 }
 
+function queueAttachmentDraft(draft) {
+  pendingQuestions.value = []
+  questionPickerOpen.value = false
+  Object.assign(attachment, { ...draft, menuOpen: false })
+  const message = { role: 'user', text: '', attachment: { ...draft } }
+  messages.push(message)
+  attachmentMessage.value = message
+  scrollBottom()
+  // 选完/裁切完直接上传 + 识别 + 解答
+  sendAttachment()
+}
+
 function setPdfDraft(filePath, file, name, size) {
   if (size > 20 * 1024 * 1024) {
     uni.showToast({ title: 'PDF 文件不能超过 20 MB', icon: 'none' })
     return
   }
-  const draft = { filePath: String(filePath || name || 'document.pdf'), file: typeof File !== 'undefined' && file instanceof File ? file : null, name, size, id: '', ocrText: '', statusText: '待发送', mediaType: 'application/pdf', pageCount: 0, failedPages: [] }
-  Object.assign(attachment, draft)
-  const message = { role: 'user', text: '', attachment: { ...draft } }
-  messages.push(message)
-  attachmentMessage.value = message
-  scrollBottom()
+  queueAttachmentDraft({
+    filePath: String(filePath || name || 'document.pdf'),
+    file: typeof File !== 'undefined' && file instanceof File ? file : null,
+    name,
+    size,
+    id: '',
+    ocrText: '',
+    statusText: '待发送',
+    mediaType: 'application/pdf',
+    pageCount: 0,
+    failedPages: [],
+  })
+}
+
+function consumeCropResult() {
+  const result = cropSession.result
+  if (!result) return
+  cropSession.result = null
+  if (result.cancelled) {
+    resetCropSession()
+    return
+  }
+  if (!result.filePath) {
+    resetCropSession()
+    return
+  }
+  queueAttachmentDraft({
+    filePath: result.filePath,
+    file: result.file || null,
+    name: result.name || '题目图片',
+    size: result.size || 0,
+    id: '',
+    ocrText: '',
+    statusText: '待发送',
+  })
+  resetCropSession()
 }
 
 function toggleAttachmentMenu() {
@@ -1793,6 +2432,8 @@ function toggleAttachmentMenu() {
 
 function chooseAttachment(sourceType) {
   attachment.menuOpen = false
+  pendingQuestions.value = []
+  questionPickerOpen.value = false
   uni.chooseImage({ count: 1, sizeType: ['compressed'], sourceType: [sourceType], success: (res) => {
     const path = res.tempFilePaths && res.tempFilePaths[0]
     const file = res.tempFiles && res.tempFiles[0]
@@ -1805,11 +2446,27 @@ function chooseAttachment(sourceType) {
       return
     }
     const draft = { filePath: path, file: file && typeof File !== 'undefined' && file instanceof File ? file : null, name, size, id: '', ocrText: '', statusText: '待发送' }
-    Object.assign(attachment, { ...draft, menuOpen: false })
-    const message = { role: 'user', text: '', attachment: { ...draft } }
-    messages.push(message)
-    attachmentMessage.value = message
-    scrollBottom()
+
+    // #ifdef H5 || APP-PLUS
+    cropSession.src = path
+    cropSession.file = draft.file
+    cropSession.name = name
+    cropSession.size = size
+    cropSession.result = null
+    uni.navigateTo({
+      url: '/pages/crop/crop',
+      fail: () => {
+        resetCropSession()
+        queueAttachmentDraft(draft)
+      },
+    })
+    // #endif
+
+    // #ifndef H5
+    // #ifndef APP-PLUS
+    queueAttachmentDraft(draft)
+    // #endif
+    // #endif
   }, fail: () => uni.showToast({ title: '未选择图片', icon: 'none' }) })
 }
 
@@ -1845,11 +2502,55 @@ async function recognizeAttachment({ fromUpload = false } = {}) {
   } finally { attachmentBusy.value = false }
 }
 
+async function maybeAutoSolveAttachment() {
+  const text = String(attachment.ocrText || '').trim()
+  if (!text || /识别失败/.test(attachment.statusText)) return
+
+  const questions = splitQuestionText(text)
+  if (questions.length > 1) {
+    pendingQuestions.value = questions
+    questionPickerOpen.value = true
+    attachment.statusText = '识别到多道题，请选择'
+    if (attachmentMessage.value) {
+      attachmentMessage.value.attachment.statusText = attachment.statusText
+    }
+    return
+  }
+
+  attachment.statusText = '识别完成，正在解答'
+  if (attachmentMessage.value) {
+    attachmentMessage.value.attachment.statusText = attachment.statusText
+  }
+  await solveAttachment()
+}
+
+function chooseQuestion(index) {
+  const text = pendingQuestions.value[index]
+  if (!text) return
+
+  questionPickerOpen.value = false
+  pendingQuestions.value = []
+  attachment.ocrText = text
+  if (attachmentMessage.value) {
+    attachmentMessage.value.attachment.ocrText = text
+    attachmentMessage.value.attachment.statusText = '正在解答'
+  }
+  attachment.statusText = '正在解答'
+  solveAttachment()
+}
+
+function onMessageOcrInput(msg) {
+  if (!msg || !msg.attachment) return
+  attachmentMessage.value = msg
+  attachment.ocrText = msg.attachment.ocrText || ''
+}
+
 async function recognizeMessageAttachment(msg) {
   if (!msg || !msg.attachment) return
   attachmentMessage.value = msg
   Object.assign(attachment, msg.attachment)
   await recognizeAttachment()
+  await maybeAutoSolveAttachment()
 }
 
 async function solveMessageAttachment(msg) {
@@ -1864,10 +2565,9 @@ async function solveMessageAttachment(msg) {
   attachment.filePath = msg.attachment.filePath
   attachment.pageCount = msg.attachment.pageCount || 0
   attachment.failedPages = msg.attachment.failedPages || []
-  // 确保使用当前编辑区最新的 ocrText，而不是卡片中的旧值
-  if (!attachment.ocrText.trim() && msg.attachment.ocrText) {
-    attachment.ocrText = msg.attachment.ocrText
-  }
+  // 卡片里的文本是用户最后编辑的版本，优先使用它
+  const text = String(msg.attachment.ocrText || attachment.ocrText || '').trim()
+  if (text) attachment.ocrText = text
   await solveAttachment()
 }
 
@@ -1883,10 +2583,10 @@ function syncOcrText() {
 async function solveWithCandidate(msg, candidate) {
   if (!msg || !candidate || !msg.attachment || attachmentBusy.value) return
   attachmentMessage.value = msg
-  // 只同步元数据，保留编辑区最新的 ocrText
+  // 只同步元数据，保留用户最后编辑的 ocrText
   attachment.id = msg.attachment.id
   attachment.statusText = msg.attachment.statusText
-  if (!attachment.ocrText.trim() && msg.attachment.ocrText) {
+  if (msg.attachment.ocrText) {
     attachment.ocrText = msg.attachment.ocrText
   }
   await solveAttachment(candidate.id)
@@ -1902,6 +2602,9 @@ async function solveAttachment(knowledgePointId = null) {
 
   attachmentBusy.value = true
   attachment.statusText = '知识点匹配与解答生成中'
+  if (attachmentMessage.value) {
+    attachmentMessage.value.attachment.statusText = attachment.statusText
+  }
 
   // 构建请求体
   const payload = { text }
@@ -1944,6 +2647,8 @@ async function solveAttachment(knowledgePointId = null) {
       videosError: false,
       videosNoIds: false
     })
+    const aiMsg = messages[messages.length - 1]
+    if (aiMsg && !aiMsg.refused && !aiMsg.failed) loadVideos(aiMsg)
 
     attachment.statusText = '已完成'
 
@@ -2009,6 +2714,9 @@ async function sendAttachment() {
   if (!store.auth.user) { uni.showToast({ title: '登录后才能上传题目图片', icon: 'none' }); return }
   attachmentBusy.value = true
   attachment.statusText = '上传中'
+  if (attachmentMessage.value) {
+    attachmentMessage.value.attachment.statusText = '上传中'
+  }
   try {
     const data = await uploadAttachment(attachment.filePath, { file: attachment.file, conversationId: store.currentConversationId || null })
     attachment.mediaType = data.media_type || attachment.mediaType
@@ -2022,6 +2730,7 @@ async function sendAttachment() {
     }
     attachment.statusText = '识别中'
     await recognizeAttachment({ fromUpload: true })
+    await maybeAutoSolveAttachment()
   } catch (e) {
     attachment.statusText = '上传失败'
     if (attachmentMessage.value) {
@@ -2031,6 +2740,18 @@ async function sendAttachment() {
     uni.showToast({ title: `${(e && e.message) || '附件上传失败，请重试'}${e && e.code ? `（${e.code}）` : ''}`, icon: 'none' })
     attachmentBusy.value = false
   }
+}
+
+/** 聊天用年级：登录用户读资料，游客读本地设置；只影响讲解深度。 */
+function currentGradeForChat() {
+  const grade = store.auth.user && store.auth.user.grade
+  if (Number.isInteger(grade)) return grade
+  const saved = uni.getStorageSync('user_grade')
+  const parsed = Number(saved)
+  if (saved !== '' && saved != null && Number.isInteger(parsed) && parsed >= 1 && parsed <= 9) {
+    return parsed
+  }
+  return null
 }
 
 function send() {
@@ -2049,6 +2770,7 @@ function send() {
     conversationId: loggedIn ? store.currentConversationId || null : null,
     clientRequestId: loggedIn ? requestId : null,
     auth: loggedIn,
+    grade: currentGradeForChat(),
   })
     .then((data) => {
       if (data.conversation_id) {
@@ -2074,6 +2796,8 @@ function send() {
         videosError: false,
         videosNoIds: false,
       })
+      const aiMsg = messages[messages.length - 1]
+      if (aiMsg && !aiMsg.refused && !aiMsg.failed) loadVideos(aiMsg)
             // 普通文字提问成功后，自动朗读
       if (autoPlayEnabled.value && !data.refused) {
         const currentIndex = messages.length - 1
@@ -2120,8 +2844,25 @@ function send() {
     })
 }
 
+// 移动端播放器会显示合集总时长/播放量，隐藏封面信息避免被误认为整条合集。
+function withHideCoverInfo(url) {
+  if (!url || url.includes('hideCoverInfo=')) return url
+  return url + (url.includes('?') ? '&' : '?') + 'hideCoverInfo=1'
+}
+
 function openVideo(gap, video) {
   // #ifdef H5
+  // 移动端内嵌 B 站播放器（mbplayer.html）会尝试跨域设置 window.parent.player，
+  // 在 iframe 里会抛未捕获异常导致控件初始化中断；改为顶层新页面打开。
+  const ua = navigator.userAgent || ''
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) {
+    const mobileUrl = buildBilibiliMobileUrl(video.bvid, video.page, video.aid, video.cid)
+    if (mobileUrl) {
+      const win = window.open(mobileUrl, '_blank')
+      if (!win) window.location.href = mobileUrl
+      return
+    }
+  }
   const current = activeVideo.value
   if (
     current &&
@@ -2130,7 +2871,7 @@ function openVideo(gap, video) {
   ) {
     activeVideo.value = null
   } else {
-    activeVideo.value = { ...video, node_key: gap.id }
+    activeVideo.value = { ...video, node_key: gap.id, embed_url: withHideCoverInfo(video.embed_url) }
   }
   return
   // #endif
@@ -2148,9 +2889,11 @@ function openVideo(gap, video) {
 
 function openMobilePlayer(video) {
   if (!video) return
-  const mobileUrl = buildBilibiliMobileUrl(video.bvid, video.page)
+  const mobileUrl = buildBilibiliMobileUrl(video.bvid, video.page, video.aid, video.cid)
   if (!mobileUrl) return
-  activeVideo.value = { ...video, embed_url: mobileUrl }
+  // 顶层新窗口打开：避免移动播放器在 iframe 中访问 window.parent 触发跨域异常。
+  const win = window.open(mobileUrl, '_blank')
+  if (!win) window.location.href = mobileUrl
 }
 
 function openWatchPage(video) {
@@ -2167,10 +2910,16 @@ function closeVideo() {
   activeVideo.value = null
 }
 
-async function loadVideos(msg) {
+async function loadVideos(msg, force = false) {
   if (!msg || msg.videosLoading) return
+  if (msg.videosLoaded && !force) return
   const gaps = (msg.prerequisite_gaps || []).filter((g) => g && g.id)
-  if (!gaps.length) {
+  const bodyId = (msg.learning_path && msg.learning_path.body_id) || ''
+  const gapIds = Array.from(new Set(gaps.map((g) => g.id)))
+  const bodyIds = bodyId && !gapIds.includes(bodyId) ? [bodyId] : []
+  // 后端一次最多接受 20 个 node_key，超出会 400；这里截断 gap，优先保留本体
+  const ids = [...gapIds.slice(0, 20 - bodyIds.length), ...bodyIds]
+  if (!ids.length) {
     msg.videosLoaded = true
     msg.videosNoIds = true
     return
@@ -2180,7 +2929,7 @@ async function loadVideos(msg) {
   msg.videosLoading = true
   msg.videosError = false
   try {
-    const data = await listVideos(gaps.map((g) => g.id), { limit: 2 })
+    const data = await listVideos(ids, { limit: 2 })
     const byNode = {}
     for (const item of data.items || []) {
       byNode[item.node_key] = item.videos || []
@@ -2189,6 +2938,9 @@ async function loadVideos(msg) {
       gap.videos = byNode[gap.id] || []
       gap.videosLoaded = true
     }
+    // 本体知识点也有视频时，显示在“解题过程”下方
+    msg.bodyVideos = bodyId ? (byNode[bodyId] || []) : []
+    msg.bodyVideosLoaded = true
     msg.videosLoaded = true
   } catch (e) {
     msg.videosError = true
@@ -2212,79 +2964,151 @@ function goPath(msg) {
 </script>
 
 <style>
-/* ...原有样式全部保留... */
-.page {
+/* 局部语义色：警告/成功/危险的浅底在深浅模式下保持可读 */
+.tab-root {
+  --ik-danger-weak: rgba(229, 62, 62, 0.08);
+  --ik-danger-line: rgba(229, 62, 62, 0.32);
+  --ik-warn: #c05621;
+  --ik-warn-strong: #975a16;
+  --ik-warn-weak: rgba(192, 86, 33, 0.1);
+  --ik-warn-line: rgba(192, 86, 33, 0.35);
+  --ik-success-weak: rgba(47, 158, 104, 0.1);
+}
+.tab-root.is-dark {
+  --ik-danger-weak: rgba(255, 107, 107, 0.14);
+  --ik-danger-line: rgba(255, 107, 107, 0.38);
+  --ik-warn: #f6ad55;
+  --ik-warn-strong: #fbd38d;
+  --ik-warn-weak: rgba(246, 173, 85, 0.14);
+  --ik-warn-line: rgba(246, 173, 85, 0.4);
+  --ik-success-weak: rgba(74, 222, 128, 0.16);
+}
+
+.tab-root {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f6f8;
+  background: var(--ik-bg);
+  overflow: hidden;
 }
-
 /* #ifdef H5 */
-.page {
+.tab-root {
   height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px));
 }
 /* #endif */
 
-/* 自定义导航栏样式 */
+.tab-swiper {
+  flex: 1;
+  height: 0; /* flex 子项必须显式给 0，否则 swiper 高度异常 */
+  min-height: 0;
+}
+.tab-swiper-item {
+  height: 100%;
+  overflow: hidden;
+}
+.tab-swiper-item .page {
+  height: 100%;
+}
+
+/* 主题背景图由 ThemeBackground 组件统一处理，排除它之外的子元素保持原有层级 */
+.tab-root > *:not(.theme-bg) {
+  position: relative;
+  z-index: 1;
+}
+/* 按住说话浮层必须真正 fixed，不能被上面的通用规则改成 relative */
+.tab-root > .voice-overlay {
+  position: fixed;
+  z-index: 900;
+}
+/* 侧边栏必须在底部导航之上，抽屉才能盖住 tabbar */
+.tab-root > .sidebar-root {
+  z-index: 10;
+}
+
+/* 左边缘手势热区：16dp，避开底部导航，避免挡住 tab 点击 */
+.tab-root > .drawer-edge {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  width: 32rpx;
+  z-index: 5;
+  background: transparent;
+}
+
+/* wd-popup 需要脱离 .tab-root > * 的层叠上下文，fixed 才能覆盖全局 */
+.tab-root > .wd-popup-wrapper {
+  position: static;
+  z-index: auto;
+}
+
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--ik-bg);
+}
+
+/* 深色模式用描边替代黑色阴影 */
+.is-dark .bubble-ai {
+  box-shadow: none;
+  border: 1rpx solid var(--ik-line);
+}
+.is-dark .input {
+  box-shadow: none;
+  border: 1rpx solid var(--ik-line);
+}
+
+/* 自定义导航栏：56dp 内容高，仅图标操作，不设标题 */
 .topbar {
+  flex: 0 0 auto;
+  height: 112rpx;
+  box-sizing: content-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20rpx 32rpx; 
-  background: #f5f6f8;
+  padding: 0 4rpx;
+  background: var(--ik-bg);
   position: relative;
   z-index: 10;
 }
 
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-
-.menu-btn {
-  font-size: 36rpx;
-  color: #333;
-  cursor: pointer;
-  font-weight: bold;
-  padding-right: 8rpx;
-  transition: transform 0.1s;
-}
-.menu-btn:active {
-  transform: scale(0.9); 
-}
-
-.topbar-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  color: #333;
-}
-
 .topbar-actions {
   display: flex;
-  gap: 12rpx; 
   align-items: center;
+  gap: 4rpx;
 }
 
-.topbar-link {
-  font-size: 26rpx;
-  color: #444; 
-  padding: 8rpx 16rpx; 
-  border-radius: 12rpx;
-  cursor: pointer;
-  transition: background 0.2s;
+/* 48dp 触控区，图标视觉宽度约 22dp */
+.topbar-icon-btn {
+  width: 96rpx;
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24rpx;
+  color: var(--ik-t1);
+  transition: background 0.15s;
 }
-
-.topbar-link:active {
-  background: #f0f2f5;
-  color: #2b6cb0; 
+.topbar-icon-btn:active {
+  background: var(--ik-soft);
+}
+.topbar-icon-btn.is-off {
+  opacity: 0.45;
+}
+.topbar-icon-btn .topbar-icon {
+  font-size: 44rpx;
+  line-height: 1;
+  color: currentColor;
+}
+.topbar-icon-btn .topbar-icon--primary {
+  color: var(--ik-primary);
 }
 
 .load-earlier {
   text-align: center;
   font-size: 24rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
   padding: 12rpx 0 24rpx;
 }
 
@@ -2296,20 +3120,160 @@ function goPath(msg) {
 }
 
 .welcome {
-  margin-top: 120rpx;
+  margin-top: 96rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-.welcome-emoji {
-  font-size: 96rpx;
+.welcome-mark {
+  width: 128rpx;
+  height: 128rpx;
   margin-bottom: 24rpx;
 }
 .welcome-text {
   font-size: 28rpx;
-  color: #999;
+  color: var(--ik-t2);
   text-align: center;
   line-height: 1.6;
+  padding: 0 24rpx;
+}
+/* ---------- 今日建议 ---------- */
+.today-card {
+  margin-bottom: 24rpx;
+  padding: 24rpx;
+  background: var(--ik-card);
+  border: 1rpx solid var(--ik-line);
+  border-radius: 20rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04);
+}
+.today-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.today-head-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.today-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--ik-t1);
+}
+.today-sub {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: var(--ik-t3);
+}
+.today-close {
+  flex: 0 0 auto;
+  width: 44rpx;
+  height: 44rpx;
+  margin-left: 16rpx;
+  line-height: 40rpx;
+  text-align: center;
+  border-radius: 50%;
+  color: var(--ik-t3);
+  font-size: 32rpx;
+}
+.today-close:active {
+  background: var(--ik-soft);
+}
+.today-list {
+  margin-top: 16rpx;
+}
+.today-item {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 0;
+  border-top: 1rpx solid var(--ik-line);
+}
+.today-item:first-child {
+  padding-top: 8rpx;
+  border-top: none;
+}
+.today-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.today-item-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx;
+}
+.today-badge {
+  flex: 0 0 auto;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  color: var(--ik-primary);
+  background: var(--ik-primary-weak);
+}
+.today-badge.is-wrong {
+  color: var(--ik-danger);
+  background: var(--ik-danger-weak);
+}
+.today-badge.is-trend {
+  color: var(--ik-warn-strong);
+  background: var(--ik-warn-weak);
+}
+.today-badge.is-prerequisite {
+  color: var(--ik-success);
+  background: var(--ik-success-weak);
+}
+.today-badge.is-onboarding {
+  color: var(--ik-t2);
+  background: var(--ik-soft);
+}
+.today-name {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--ik-t1);
+}
+.today-grade {
+  font-size: 20rpx;
+  color: var(--ik-t3);
+}
+.today-reason {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  line-height: 1.5;
+  color: var(--ik-t2);
+}
+.today-arrow {
+  flex: 0 0 auto;
+  margin-left: 12rpx;
+  font-size: 30rpx;
+  color: var(--ik-t3);
+}
+
+.quick-list {
+  width: 100%;
+  max-width: 560rpx;
+  margin-top: 36rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+.quick-item {
+  height: 80rpx;
+  line-height: 80rpx;
+  padding: 0 24rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: var(--ik-t1);
+  background: var(--ik-card);
+  border: 1rpx solid var(--ik-line);
+  border-radius: 999rpx;
+  box-sizing: border-box;
+}
+.quick-item:active {
+  color: var(--ik-primary);
+  background: var(--ik-primary-weak);
+  border-color: var(--ik-primary);
 }
 
 .msg-row {
@@ -2325,9 +3289,8 @@ function goPath(msg) {
 .msg-user { justify-content: flex-end; }
 .msg-ai { justify-content: flex-start; }
 .msg-content { min-width: 0; max-width: calc(100% - 84rpx); }
-.message-avatar { flex: 0 0 64rpx; width: 64rpx; height: 64rpx; border-radius: 50%; background: #e7eef7; object-fit: cover; }
-.avatar-fallback { border: 8rpx solid #d9e4f2; box-sizing: border-box; }
-.assistant-name { margin: 2rpx 0 8rpx 4rpx; color: #5b6b7f; font-size: 22rpx; }
+.message-avatar { flex: 0 0 64rpx; width: 64rpx; height: 64rpx; border-radius: 50%; background: var(--ik-soft); object-fit: cover; }
+.assistant-name { margin: 2rpx 0 8rpx 4rpx; color: var(--ik-t2); font-size: 22rpx; }
 
 .bubble {
   max-width: 86%;
@@ -2338,35 +3301,38 @@ function goPath(msg) {
   word-break: break-all;
 }
 .bubble-user {
-  background: #2b6cb0;
-  color: #fff;
+  background: var(--ik-primary);
+  color: var(--ik-on-primary);
   border-top-right-radius: 6rpx;
 }
+.msg-user .bubble {
+  max-width: 100%;
+}
 .bubble-ai {
-  background: #fff;
-  color: #333;
+  background: var(--ik-card);
+  color: var(--ik-t1);
   border-top-left-radius: 6rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 }
-.answer-summary { padding-bottom: 12rpx; border-bottom: 1rpx solid #eef2f6; }
-.summary-label { display: block; margin-bottom: 8rpx; color: #718096; font-size: 22rpx; font-weight: 600; }
-.final-answer { margin-top: 18rpx; padding: 18rpx; background: #edf8f2; border-left: 6rpx solid #2f9e68; border-radius: 8rpx; }
+.answer-summary { padding-bottom: 8rpx; }
+.summary-label { display: block; margin-bottom: 8rpx; color: var(--ik-t2); font-size: 22rpx; font-weight: 600; }
+.final-answer { margin-top: 18rpx; padding: 18rpx; background: var(--ik-success-weak); border-left: 6rpx solid var(--ik-success); border-radius: 8rpx; }
 .final-label, .final-text { display: block; }
-.final-label { color: #197247; font-size: 24rpx; font-weight: 700; }
-.final-text { margin-top: 6rpx; color: #145c3a; font-size: 30rpx; font-weight: 700; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.section-count { flex: 1; margin: 0 10rpx; color: #8793a2; font-size: 22rpx; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.question-card { width: min(620rpx, 100%); padding: 18rpx; background: #f7f9fc; border: 1rpx solid #dce6f0; border-radius: 14rpx; box-sizing: border-box; }
-.question-card-head { display: flex; justify-content: space-between; gap: 12rpx; color: #2f4358; font-size: 26rpx; font-weight: 700; }
-.question-status { color: #66809a; font-size: 22rpx; font-weight: 400; }
-.ocr-warning { display: block; margin-top: 10rpx; padding: 10rpx 12rpx; color: #9a6412; background: #fff7e6; border-radius: 6rpx; font-size: 22rpx; line-height: 1.45; }
-.question-image { display: block; width: 100%; max-height: 520rpx; margin-top: 14rpx; border-radius: 8rpx; background: #e9eef5; }
-.question-file { margin-top: 8rpx; color: #8592a1; font-size: 21rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.question-label { display: block; margin-top: 16rpx; color: #52657a; font-size: 23rpx; font-weight: 600; }
-.question-text { width: 100%; min-height: 110rpx; margin-top: 8rpx; padding: 14rpx; box-sizing: border-box; background: #fff; border: 1rpx solid #d7e0ea; border-radius: 8rpx; color: #263746; font-size: 26rpx; line-height: 1.55; }
+.final-label { color: var(--ik-success); font-size: 24rpx; font-weight: 700; }
+.final-text { margin-top: 6rpx; color: var(--ik-success); font-size: 30rpx; font-weight: 700; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.section-count { flex: 1; margin: 0 10rpx; color: var(--ik-t2); font-size: 22rpx; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question-card { width: min(620rpx, 100%); padding: 18rpx; background: var(--ik-soft); border: 1rpx solid var(--ik-line); border-radius: 14rpx; box-sizing: border-box; }
+.question-card-head { display: flex; justify-content: space-between; gap: 12rpx; color: var(--ik-t1); font-size: 26rpx; font-weight: 700; }
+.question-status { color: var(--ik-t3); font-size: 22rpx; font-weight: 400; }
+.ocr-warning { display: block; margin-top: 10rpx; padding: 10rpx 12rpx; color: var(--ik-warn-strong); background: var(--ik-warn-weak); border-radius: 6rpx; font-size: 22rpx; line-height: 1.45; }
+.question-image { display: block; width: 100%; max-height: 520rpx; margin-top: 14rpx; border-radius: 8rpx; background: var(--ik-soft); }
+.question-file { margin-top: 8rpx; color: var(--ik-t3); font-size: 21rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question-label { display: block; margin-top: 16rpx; color: var(--ik-t2); font-size: 23rpx; font-weight: 600; }
+.question-text { width: 100%; min-height: 110rpx; margin-top: 8rpx; padding: 14rpx; box-sizing: border-box; background: var(--ik-input-bg); border: 1rpx solid var(--ik-line); border-radius: 8rpx; color: var(--ik-t1); font-size: 26rpx; line-height: 1.55; }
 .question-actions { display: flex; gap: 10rpx; margin-top: 10rpx; }
-.question-actions button { flex: 1; min-width: 0; margin: 0; padding: 0 10rpx; color: #2f6fb3; background: #e6f0fb; border: 0; border-radius: 8rpx; font-size: 23rpx; line-height: 58rpx; }
+.question-actions button { flex: 1; min-width: 0; margin: 0; padding: 0 10rpx; color: var(--ik-primary); background: var(--ik-primary-weak); border: 0; border-radius: 8rpx; font-size: 23rpx; line-height: 58rpx; }
 .typing {
-  color: #999;
+  color: var(--ik-t3);
 }
 
 .head {
@@ -2377,42 +3343,33 @@ function goPath(msg) {
   margin-bottom: 16rpx;
 }
 .chip {
-  background: #e8f0fb;
-  color: #2b6cb0;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
   font-size: 24rpx;
   padding: 4rpx 16rpx;
   border-radius: 999rpx;
 }
 .source {
+  display: block;
+  margin-top: 8rpx;
   font-size: 22rpx;
-  color: #999;
+  color: var(--ik-t2);
 }
 
 .section {
-  border-top: 1rpx solid #f0f0f0;
+  border-top: 1rpx solid var(--ik-line);
   padding: 16rpx 0;
 }
 .section-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 600;
-  color: #444;
-}
-.section-head-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.section-head-right .tts-btn {
-  margin: 0;
-  white-space: nowrap;
+  color: var(--ik-t1);
 }
 .arrow {
-  color: #bbb;
+  color: var(--ik-t3);
   font-size: 28rpx;
 }
 .section-body {
@@ -2420,7 +3377,7 @@ function goPath(msg) {
 }
 .answer {
   font-size: 28rpx;
-  color: #333;
+  color: var(--ik-t1);
   white-space: pre-wrap;
 }
 .gap {
@@ -2431,7 +3388,7 @@ function goPath(msg) {
 }
 .gap-name {
   font-size: 28rpx;
-  color: #333;
+  color: var(--ik-t1);
 }
 .gap-tag {
   font-size: 20rpx;
@@ -2439,25 +3396,36 @@ function goPath(msg) {
   border-radius: 999rpx;
 }
 .t-required {
-  background: #fde8e8;
-  color: #e53e3e;
+  background: var(--ik-danger-weak);
+  color: var(--ik-danger);
 }
 .t-suggest {
-  background: #fff7e6;
-  color: #dd6b20;
+  background: var(--ik-warn-weak);
+  color: var(--ik-warn);
 }
 
 .gap-block {
   padding: 8rpx 0;
 }
 .gap-block + .gap-block {
-  border-top: 1rpx dashed #f2f2f2;
+  border-top: 1rpx dashed var(--ik-line);
 }
 .video-list {
   display: flex;
   flex-wrap: wrap;
   gap: 16rpx;
   margin: 4rpx 0 12rpx;
+}
+.body-video-list {
+  margin-top: 12rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx dashed var(--ik-line);
+}
+.video-section-label {
+  width: 100%;
+  font-size: 22rpx;
+  color: var(--ik-dim);
+  margin-bottom: 2rpx;
 }
 .video-card {
   flex: 1 1 280rpx;
@@ -2466,8 +3434,8 @@ function goPath(msg) {
   display: flex;
   gap: 12rpx;
   padding: 10rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e6eef8;
+  background: var(--ik-soft);
+  border: 1rpx solid var(--ik-line);
   border-radius: 14rpx;
 }
 .video-cover {
@@ -2490,9 +3458,9 @@ function goPath(msg) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--ik-on-primary);
   font-size: 24rpx;
-  background: #2b6cb0;
+  background: var(--ik-primary);
 }
 .video-play {
   position: absolute;
@@ -2526,7 +3494,7 @@ function goPath(msg) {
 }
 .video-title {
   font-size: 24rpx;
-  color: #333;
+  color: var(--ik-t1);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2536,12 +3504,12 @@ function goPath(msg) {
 .video-author {
   margin-top: 6rpx;
   font-size: 20rpx;
-  color: #999;
+  color: var(--ik-t3);
 }
 .video-empty {
   display: block;
   font-size: 22rpx;
-  color: #bbb;
+  color: var(--ik-t3);
   padding: 4rpx 0 8rpx;
 }
 .video-empty-row {
@@ -2551,7 +3519,7 @@ function goPath(msg) {
 }
 .video-retry {
   font-size: 22rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
   padding: 4rpx 0 8rpx;
 }
 .video-player {
@@ -2570,7 +3538,7 @@ function goPath(msg) {
   display: block;
   text-align: center;
   font-size: 22rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
   padding: 8rpx 0;
 }
 .video-actions {
@@ -2582,25 +3550,25 @@ function goPath(msg) {
 }
 .video-action {
   font-size: 22rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
 }
 .video-hint {
   display: block;
   text-align: center;
   font-size: 20rpx;
-  color: #bbb;
+  color: var(--ik-t3);
   padding: 0 0 8rpx;
 }
 .video-hint.warn {
-  color: #c05621;
+  color: var(--ik-warn);
 }
 .empty {
   font-size: 26rpx;
-  color: #bbb;
+  color: var(--ik-t3);
 }
 .exercise {
   padding: 12rpx 0;
-  border-bottom: 1rpx dashed #eee;
+  border-bottom: 1rpx dashed var(--ik-line);
 }
 .exercise:last-child {
   border-bottom: none;
@@ -2609,13 +3577,13 @@ function goPath(msg) {
   display: block;
   font-size: 24rpx;
   font-weight: 600;
-  color: #2b6cb0;
+  color: var(--ik-primary);
   margin-bottom: 6rpx;
 }
 .exercise-text {
   display: block;
   font-size: 28rpx;
-  color: #333;
+  color: var(--ik-t1);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2623,51 +3591,51 @@ function goPath(msg) {
 .exercise-hint {
   display: block;
   font-size: 22rpx;
-  color: #999;
+  color: var(--ik-t3);
   margin-bottom: 8rpx;
 }
 
 .refuse-card {
-  background: #fff5f5;
-  border: 1rpx solid #feb2b2;
+  background: var(--ik-danger-weak);
+  border: 1rpx solid var(--ik-danger-line);
   border-radius: 16rpx;
   padding: 24rpx;
 }
 .refuse-title {
   font-size: 30rpx;
   font-weight: 600;
-  color: #e53e3e;
+  color: var(--ik-danger);
   margin-bottom: 12rpx;
 }
 .refuse-closest {
   font-size: 26rpx;
-  color: #9b2c2c;
+  color: var(--ik-danger);
 }
 
 .failed-card {
-  background: #fffaf0;
-  border: 1rpx solid #fbd38d;
+  background: var(--ik-warn-weak);
+  border: 1rpx solid var(--ik-warn-line);
   border-radius: 16rpx;
   padding: 24rpx;
 }
 .failed-title {
   font-size: 30rpx;
   font-weight: 600;
-  color: #c05621;
+  color: var(--ik-warn);
   margin-bottom: 12rpx;
 }
 .failed-text {
   font-size: 26rpx;
-  color: #975a16;
+  color: var(--ik-warn-strong);
   line-height: 1.6;
 }
 .retry-btn {
   margin-top: 18rpx;
   display: inline-block;
-  background: #fff;
-  color: #c05621;
+  background: var(--ik-card);
+  color: var(--ik-warn);
   font-size: 24rpx;
-  border: 1rpx solid #fbd38d;
+  border: 1rpx solid var(--ik-warn-line);
   border-radius: 999rpx;
   padding: 0 24rpx;
   line-height: 60rpx;
@@ -2677,14 +3645,18 @@ function goPath(msg) {
 }
 
 .path-btn {
+  display: block;
+  width: 100%;
   margin-top: 20rpx;
-  background: #e8f0fb;
-  color: #2b6cb0;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
   font-size: 26rpx;
   border-radius: 999rpx;
   padding: 0 24rpx;
-  line-height: 64rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   border: none;
+  box-sizing: border-box;
 }
 .path-btn::after {
   border: none;
@@ -2695,15 +3667,15 @@ function goPath(msg) {
   align-items: center;
   gap: 16rpx;
   padding: 12rpx 24rpx;
-  background: #f5f6f8;
-  border-top: 1rpx solid #eee;
+  background: var(--ik-bg);
+  border-top: 1rpx solid var(--ik-line);
 }
 .attachment-thumb {
   flex: 0 0 88rpx;
   width: 88rpx;
   height: 88rpx;
   border-radius: 8rpx;
-  background: #f2f3f5;
+  background: var(--ik-soft);
 }
 .attachment-draft-meta {
   min-width: 0;
@@ -2715,9 +3687,9 @@ function goPath(msg) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.attachment-name { font-size: 26rpx; color: #333; }
-.attachment-size { margin-top: 6rpx; font-size: 22rpx; color: #777; }
-.attachment-remove, .plus-btn {
+.attachment-name { font-size: 26rpx; color: var(--ik-t1); }
+.attachment-size { margin-top: 6rpx; font-size: 22rpx; color: var(--ik-t2); }
+.attachment-remove {
   flex: 0 0 64rpx;
   width: 64rpx;
   height: 64rpx;
@@ -2727,143 +3699,362 @@ function goPath(msg) {
   line-height: 64rpx;
   text-align: center;
 }
-.attachment-remove { color: #c53030; background: #fff5f5; font-size: 36rpx; }
-.attachment-text-editor { padding: 12rpx 24rpx; background: #f5f6f8; }
-.attachment-text-editor textarea { width: 100%; min-height: 120rpx; box-sizing: border-box; padding: 16rpx; background: #f7f8fa; border-radius: 8rpx; font-size: 26rpx; }
+.attachment-remove { color: var(--ik-danger); background: var(--ik-danger-weak); font-size: 36rpx; }
+.attachment-text-editor { padding: 12rpx 24rpx; background: var(--ik-bg); }
+.attachment-text-editor textarea { width: 100%; min-height: 120rpx; box-sizing: border-box; padding: 16rpx; background: var(--ik-input-bg); border-radius: 8rpx; font-size: 26rpx; }
 .attachment-actions { display: flex; gap: 12rpx; margin-top: 10rpx; }
-.attachment-actions button { flex: 1; margin: 0; min-width: 0; font-size: 24rpx; line-height: 58rpx; color: #2b6cb0; background: #e8f0fb; border: none; border-radius: 8rpx; }
-.attachment-menu {
+.attachment-actions button { flex: 1; margin: 0; min-width: 0; font-size: 24rpx; line-height: 58rpx; color: var(--ik-primary); background: var(--ik-primary-weak); border: none; border-radius: 8rpx; }
+/* 加号：中性 40dp 图标按钮，和语音按钮同一套线性语言 */
+.plus-btn {
+  flex: 0 0 80rpx;
+  width: 80rpx;
+  height: 80rpx;
+  margin: 0 12rpx 0 0;
+  padding: 0;
   display: flex;
-  gap: 16rpx;
-  padding: 16rpx 24rpx 12rpx;
-  background: #f5f6f8;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--ik-soft);
+  color: var(--ik-t2);
+  line-height: 1;
 }
-.attachment-menu-item {
+.plus-btn::after {
+  border: none;
+}
+.plus-btn[disabled] {
+  opacity: 0.45;
+}
+.plus-icon {
+  width: 40rpx;
+  height: 40rpx;
+  display: block;
+}
+
+/* ==================== 附件选择弹层 ==================== */
+.attach-sheet {
+  padding: 16rpx 32rpx 32rpx;
+  background: var(--ik-card);
+  box-sizing: border-box;
+}
+.attach-sheet__handle {
+  width: 72rpx;
+  height: 8rpx;
+  border-radius: 4rpx;
+  background: var(--ik-line);
+  margin: 0 auto 24rpx;
+}
+.attach-sheet__head {
+  padding: 0 4rpx;
+}
+.attach-sheet__title {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--ik-t1);
+}
+.attach-sheet__sub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: var(--ik-t3);
+}
+.attach-grid {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 28rpx;
+}
+.attach-item {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  padding: 16rpx 8rpx 12rpx;
-  background: #ffffff;
-  border-radius: 12rpx;
-  box-shadow: 0 1rpx 8rpx rgba(0, 0, 0, 0.05);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  padding: 8rpx 0;
+  border-radius: var(--ik-radius);
 }
-.attachment-menu-item:active {
-  transform: scale(0.96);
-  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.08);
-}
-.attachment-menu-icon {
-  width: 64rpx;
-  height: 64rpx;
+.attach-item__icon {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f7fa;
-  border-radius: 50%;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
+  transition: transform 0.15s ease;
 }
-.ami-icon {
-  font-size: 32rpx;
-  line-height: 1;
+.attach-item:active .attach-item__icon {
+  transform: scale(0.94);
 }
-.ami-label {
-  font-size: 22rpx;
-  color: #555;
-  white-space: nowrap;
+.attach-item__icon .attach-icon {
+  font-size: 48rpx;
+  color: var(--ik-primary);
 }
-.plus-btn { margin-right: 12rpx; color: #2b6cb0; background: #e8f0fb; font-size: 40rpx; }
-.confidence, .candidate-list { font-size: 22rpx; color: #666; }
+.attach-item__label {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: var(--ik-t1);
+}
+.attach-cancel {
+  margin-top: 28rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  font-size: 28rpx;
+  color: var(--ik-t2);
+  background: var(--ik-soft);
+  border-radius: var(--ik-radius);
+}
+.attach-cancel:active {
+  opacity: 0.7;
+}
+.confidence, .candidate-list { font-size: 22rpx; color: var(--ik-t2); }
 .candidate-list { padding: 8rpx 0; }
 .candidate-label, .candidate-item { display: block; }
-.candidate-label { color: #555; font-weight: 600; }
-.candidate-item { color: #777; margin-top: 4rpx; }
-.candidate-button { display: block; width: 100%; margin: 6rpx 0 0; padding: 0 12rpx; text-align: left; background: #f5f8fc; border: 1rpx solid #d9e4f0; border-radius: 8rpx; line-height: 52rpx; font-size: 23rpx; }
+.candidate-label { color: var(--ik-t2); font-weight: 600; }
+.candidate-item { color: var(--ik-t2); margin-top: 4rpx; }
+.candidate-button { display: block; width: 100%; margin: 6rpx 0 0; padding: 0 12rpx; text-align: left; background: var(--ik-soft); border: 1rpx solid var(--ik-line); border-radius: 8rpx; line-height: 52rpx; font-size: 23rpx; }
 .solution-list { display: flex; flex-direction: column; gap: 14rpx; }
-.solution-step { padding: 16rpx; background: #f7f9fc; border-left: 6rpx solid #2b6cb0; border-radius: 6rpx; }
+.solution-step { padding: 16rpx; background: var(--ik-soft); border-left: 6rpx solid var(--ik-primary); border-radius: 6rpx; }
 .solution-step-head { display: flex; align-items: center; gap: 12rpx; margin-bottom: 8rpx; }
-.solution-step-no { width: 36rpx; height: 36rpx; flex: 0 0 36rpx; border-radius: 50%; text-align: center; line-height: 36rpx; background: #2b6cb0; color: #fff; font-size: 22rpx; font-weight: 700; }
-.solution-step-title { font-size: 27rpx; line-height: 1.45; font-weight: 700; color: #243b53; }
-.solution-step-content { display: block; font-size: 28rpx; line-height: 1.85; color: #263238; white-space: pre-wrap; word-break: break-word; }
-.question-preview { display: block; width: 100%; margin: 8rpx 0; padding: 0 16rpx; color: #2867a8; background: #e8f0fb; border: 1rpx solid #c9d9ec; border-radius: 8rpx; font-size: 24rpx; line-height: 58rpx; text-align: center; }
+.solution-step-no { width: 36rpx; height: 36rpx; flex: 0 0 36rpx; border-radius: 50%; text-align: center; line-height: 36rpx; background: var(--ik-primary); color: var(--ik-on-primary); font-size: 22rpx; font-weight: 700; }
+.solution-step-title { font-size: 27rpx; line-height: 1.45; font-weight: 700; color: var(--ik-t1); }
+.solution-step-content { display: block; font-size: 28rpx; line-height: 1.85; color: var(--ik-t1); white-space: pre-wrap; word-break: break-word; }
+.question-preview { display: block; width: 100%; margin: 8rpx 0; padding: 0 16rpx; color: var(--ik-primary); background: var(--ik-primary-weak); border: 1rpx solid var(--ik-line); border-radius: 8rpx; font-size: 24rpx; line-height: 58rpx; text-align: center; }
 .question-image { max-width: 100%; max-height: 560rpx; object-fit: contain; cursor: zoom-in; }
-.question-error { display: block; margin-top: 8rpx; color: #b42318; font-size: 23rpx; line-height: 1.45; }
-.question-retry { margin: 8rpx 0 0; padding: 0 12rpx; color: #9a3412; background: #fff7ed; border: 1rpx solid #fed7aa; border-radius: 6rpx; font-size: 22rpx; line-height: 48rpx; }
+.question-error { display: block; margin-top: 8rpx; color: var(--ik-danger); font-size: 23rpx; line-height: 1.45; }
+.question-retry { margin: 8rpx 0 0; padding: 0 12rpx; color: var(--ik-warn-strong); background: var(--ik-warn-weak); border: 1rpx solid var(--ik-warn-line); border-radius: 6rpx; font-size: 22rpx; line-height: 48rpx; }
 
 .composer {
-  background: #f5f6f8;
-}
-
-.record-row {
-  height: 44rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24rpx;
-  color: #666;
-}
-.record-text {
-  color: #e53e3e;
-}
-.record-text.subtle {
-  color: #888;
-}
-.record-cancel {
-  margin-left: 20rpx;
-  color: #2b6cb0;
+  background: var(--ik-bg);
 }
 
 .input-bar {
   display: flex;
   align-items: center;
   padding: 12rpx 24rpx;
-  background: #f5f6f8;
+  background: var(--ik-bg);
 }
 .input {
   flex: 1;
   min-width: 0;
-  height: 72rpx;
+  height: 80rpx;
   max-height: 240rpx;
   margin-right: 12rpx;
-  background: #ffffff;
+  background: var(--ik-input-bg);
   border-radius: 20rpx;
-  padding: 18rpx 28rpx;
+  padding: 20rpx 28rpx;
   font-size: 28rpx;
   box-sizing: border-box;
   line-height: 1.5;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.08);
 }
 .voice-btn {
-  flex: 0 0 72rpx;
-  width: 72rpx;
-  height: 72rpx;
+  flex: 0 0 80rpx;
+  width: 80rpx;
+  height: 80rpx;
   margin: 0 12rpx 0 0;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  background: #e8f0fb;
-  color: #2b6cb0;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
   border: none;
   border-radius: 50%;
   line-height: 1;
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: none;
 }
 .voice-btn::after {
   border: none;
 }
 .voice-btn.recording {
-  background: #e53e3e;
+  background: var(--ik-danger);
   color: #fff;
 }
 .voice-btn.uploading {
-  background: #f2f3f5;
-  color: #bbb;
+  background: var(--ik-soft);
+  color: var(--ik-t3);
 }
 .voice-btn.starting {
   opacity: 0.6;
 }
+.voice-btn.will-cancel {
+  background: var(--ik-danger);
+  color: #fff;
+  transform: scale(0.94);
+}
+
+/* 按住说话浮层：pointer-events 关闭，触摸事件仍然落在按钮上 */
+.voice-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+.voice-overlay-card {
+  width: 440rpx;
+  padding: 36rpx 32rpx 40rpx;
+  border-radius: 32rpx;
+  background: rgba(17, 24, 39, 0.92);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 18rpx 60rpx rgba(0, 0, 0, 0.28);
+}
+.voice-overlay-card.is-cancel {
+  background: rgba(127, 29, 29, 0.94);
+}
+.voice-overlay-title {
+  font-size: 34rpx;
+  font-weight: 700;
+}
+.voice-overlay-hint {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.75);
+}
+.voice-overlay-time {
+  margin-top: 18rpx;
+  font-size: 28rpx;
+  font-variant-numeric: tabular-nums;
+}
+.voice-wave {
+  height: 60rpx;
+  margin-top: 18rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+.voice-wave-bar {
+  width: 8rpx;
+  height: 20rpx;
+  border-radius: 8rpx;
+  background: #fff;
+  animation: voice-wave 0.8s ease-in-out infinite alternate;
+}
+.voice-wave.is-cancel .voice-wave-bar {
+  background: #fecaca;
+}
+@keyframes voice-wave {
+  from { height: 14rpx; opacity: 0.5; }
+  to { height: 54rpx; opacity: 1; }
+}
+
+/* 语音设置 */
+.voice-settings {
+  padding: 32rpx 32rpx 48rpx;
+  background: var(--ik-card);
+}
+.voice-settings__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+.voice-settings__title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: var(--ik-t1);
+}
+.voice-settings__close {
+  font-size: 26rpx;
+  color: var(--ik-t3);
+}
+.voice-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+.voice-settings__copy {
+  flex: 1;
+  min-width: 0;
+}
+.voice-settings__label {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: var(--ik-t1);
+}
+.voice-settings__desc {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  line-height: 1.5;
+  color: var(--ik-t3);
+}
+
+/* 多题选择 */
+.question-picker {
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  padding: 32rpx 32rpx 28rpx;
+  background: var(--ik-card);
+}
+.question-picker__head {
+  margin-bottom: 20rpx;
+}
+.question-picker__title {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: var(--ik-t1);
+}
+.question-picker__sub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: var(--ik-t3);
+}
+.question-picker__list {
+  flex: 1;
+  min-height: 0;
+  max-height: 50vh;
+}
+.question-picker__item {
+  padding: 22rpx;
+  margin-bottom: 16rpx;
+  border: 1rpx solid var(--ik-line);
+  border-radius: 16rpx;
+  background: var(--ik-soft);
+}
+.question-picker__index {
+  display: block;
+  margin-bottom: 10rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--ik-primary);
+}
+.question-picker__text {
+  display: block;
+  max-height: 200rpx;
+  overflow: hidden;
+  font-size: 27rpx;
+  line-height: 1.7;
+  color: var(--ik-t1);
+}
+.question-picker__cancel {
+  padding: 20rpx;
+  margin-top: 16rpx;
+  text-align: center;
+  font-size: 28rpx;
+  color: var(--ik-t3);
+}
+
 .voice-icon {
   width: 40rpx;
   height: 40rpx;
@@ -2883,35 +4074,41 @@ function goPath(msg) {
 .send-btn {
   flex: 0 0 140rpx;
   width: 140rpx;
-  height: 72rpx;
-  line-height: 72rpx;
+  height: 80rpx;
+  line-height: 80rpx;
   margin: 0;
-  background: #2b6cb0;
-  color: #fff;
+  background: var(--ik-primary);
+  color: var(--ik-on-primary);
   font-size: 28rpx;
-  border-radius: 36rpx;
+  border-radius: 40rpx;
   border: none;
   padding: 0;
 }
 .send-btn[disabled] {
-  background: #b0c4de;
-  color: #fff;
+  background: var(--ik-soft);
+  color: var(--ik-t3);
 }
 .send-btn::after {
   border: none;
 }
-/* TTS 朗读按钮 */
+/* TTS 朗读：纯文字动作，放在答案底部 */
+.answer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8rpx;
+}
 .tts-btn {
-  display: inline-block;
-  margin: 16rpx 12rpx 0 0;
-  padding: 0 18rpx;
-  height: 48rpx;
-  line-height: 48rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 12rpx;
+  height: 80rpx;
+  line-height: 80rpx;
   font-size: 24rpx;
-  color: #2b6cb0;
-  background: #e8f0fb;
+  color: var(--ik-primary);
+  background: transparent;
   border: none;
-  border-radius: 999rpx;
 }
 
 .tts-btn::after {
@@ -2919,24 +4116,7 @@ function goPath(msg) {
 }
 
 .tts-btn.tts-playing {
-  color: #fff;
-  background: #2b6cb0;
-}
-.sound-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 12px;
-  margin-left: 8px;
-  border-radius: 16px;
-  background: #e8f5ee;
-  color: #23965b;
-  font-size: 12px;
-  white-space: nowrap;
+  color: var(--ik-t2);
 }
 
-.sound-toggle.sound-off {
-  background: #f1f1f1;
-  color: #888;
-}
 </style>

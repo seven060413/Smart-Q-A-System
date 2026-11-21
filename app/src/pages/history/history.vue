@@ -1,5 +1,6 @@
 <template>
-  <view class="page">
+  <view class="page theme-root" :style="themeVars">
+    <ThemeBackground />
     <view class="header">
       <view class="header-text">
         <text class="title">历史会话</text>
@@ -122,7 +123,7 @@
         @click.stop="openQuestion(item, question)"
       >
         <text class="question-number">{{ qIndex + 1 }}.</text>
-        <text class="question-content">{{ question.content }}</text>
+        <MathText class="question-content" :text="question.content" />
         <text class="question-arrow">›</text>
       </view>
     </view>
@@ -154,6 +155,8 @@ import {
   listMessages
 } from '../../api.js'
 import { store } from '../../store.js'
+import { themeVars, applyNativeNavigationBar } from '../../theme/theme.js'
+import MathText from '../../components/ui/MathText.vue'
 
 const items = ref([])
 const cursor = ref('')
@@ -299,7 +302,7 @@ async function loadMore() {
 
 function openConversation(item) {
   store.pendingIndexAction = { type: 'open', conversationId: item.id }
-  uni.switchTab({ url: '/pages/index/index' })
+  uni.reLaunch({ url: '/pages/index/index?tab=0' })
 }
 
 // 展开或收起某个会话的问题列表
@@ -388,19 +391,19 @@ function openQuestion(item, question) {
     messageId: question.id
   }
 
-  uni.switchTab({
-    url: '/pages/index/index'
+  uni.reLaunch({
+    url: '/pages/index/index?tab=0'
   })
 }
 
 function newConversation() {
   store.pendingIndexAction = { type: 'new' }
-  uni.switchTab({ url: '/pages/index/index' })
+  uni.reLaunch({ url: '/pages/index/index?tab=0' })
 }
 
 function goHome() {
   store.pendingIndexAction = { type: 'home' }
-  uni.switchTab({ url: '/pages/index/index' })
+  uni.reLaunch({ url: '/pages/index/index?tab=0' })
 }
 
 function goAuth() {
@@ -438,6 +441,7 @@ function formatTime(iso) {
 }
 
 onShow(() => {
+  applyNativeNavigationBar()
   loadFirstPage()
 })
 
@@ -452,15 +456,15 @@ watch(
 <style>
 .page {
   min-height: 100vh;
-  background: #f5f6f8;
+  background: var(--ik-bg);
   display: flex;
   flex-direction: column;
 }
 
 .header {
-  background: #fff;
+  background: var(--ik-card);
   padding: 28rpx 30rpx;
-  border-bottom: 1rpx solid #eee;
+  border-bottom: 1rpx solid var(--ik-line);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -472,12 +476,12 @@ watch(
 .title {
   font-size: 36rpx;
   font-weight: 700;
-  color: #2b6cb0;
+  color: var(--ik-primary);
 }
 .subtitle {
   margin-top: 8rpx;
   font-size: 24rpx;
-  color: #999;
+  color: var(--ik-t3);
 }
 .header-actions {
   display: flex;
@@ -486,7 +490,7 @@ watch(
 }
 .link {
   font-size: 24rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
 }
 
 /* 搜索框样式 */
@@ -496,7 +500,7 @@ watch(
 .search-box {
   display: flex;
   align-items: center;
-  background: #eef0f4; 
+  background: var(--ik-soft); 
   border-radius: 40rpx; 
   padding: 20rpx 28rpx;
   border: none; 
@@ -504,18 +508,18 @@ watch(
 .search-input {
   flex: 1;
   font-size: 30rpx;
-  color: #333;
+  color: var(--ik-t1);
   background: transparent; 
   border: none;
   outline: none;
 }
 .search-placeholder {
-  color: #a0a5b0;
+  color: var(--ik-t3);
 }
 .search-icon-css {
   width: 24rpx;
   height: 24rpx;
-  border: 4rpx solid #a0a5b0;
+  border: 4rpx solid var(--ik-t3);
   border-radius: 50%;
   position: relative;
   margin-right: 16rpx;
@@ -525,13 +529,13 @@ watch(
   position: absolute;
   width: 4rpx;
   height: 14rpx;
-  background: #a0a5b0;
+  background: var(--ik-t3);
   bottom: -10rpx;
   right: -4rpx;
   transform: rotate(-45deg);
 }
 .clear-icon {
-  color: #a0a5b0;
+  color: var(--ik-t3);
   font-size: 28rpx;
   padding: 0 10rpx;
   cursor: pointer;
@@ -540,7 +544,7 @@ watch(
 /* 搜索结果提示 */
 .search-result-tip {
   font-size: 24rpx;
-  color: #999;
+  color: var(--ik-t3);
   padding: 20rpx 8rpx 10rpx 8rpx;
 }
 
@@ -555,7 +559,7 @@ watch(
 }
 .group-title {
   font-size: 26rpx;
-  color: #666;
+  color: var(--ik-t2);
   font-weight: 500;
   margin-bottom: 16rpx;
   padding-left: 8rpx;
@@ -565,7 +569,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fff;
+  background: var(--ik-card);
   border-radius: 20rpx;
   padding: 26rpx 24rpx;
   margin-bottom: 18rpx;
@@ -581,7 +585,7 @@ watch(
 }
 .item-title {
   font-size: 30rpx;
-  color: #333;
+  color: var(--ik-t1);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -611,7 +615,7 @@ watch(
 .question-list {
   margin: 12rpx 16rpx 0;
   padding: 12rpx 20rpx;
-  background: #fff;
+  background: var(--ik-card);
   border-radius: 16rpx;
   box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.04);
 }
@@ -620,7 +624,7 @@ watch(
   display: flex;
   align-items: center;
   padding: 18rpx 8rpx;
-  border-bottom: 1rpx solid #f3f3f3;
+  border-bottom: 1rpx solid var(--ik-line);
 }
 
 .question-item:last-child {
@@ -628,7 +632,7 @@ watch(
 }
 
 .question-number {
-  color: #999;
+  color: var(--ik-t3);
   font-size: 22rpx;
   margin-right: 12rpx;
   flex-shrink: 0;
@@ -638,7 +642,7 @@ watch(
   flex: 1;
   min-width: 0;
   font-size: 26rpx;
-  color: #444;
+  color: var(--ik-t2);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -648,54 +652,54 @@ watch(
 }
 
 .question-arrow {
-  color: #aaa;
+  color: var(--ik-t3);
   font-size: 28rpx;
   margin-left: 12rpx;
 }
 
 .arrow {
   font-size: 26rpx;
-  color: #999;
+  color: var(--ik-t3);
   line-height: 1;
 }
 
 .question-loading {
   padding: 24rpx 0;
-  color: #999;
+  color: var(--ik-t3);
   font-size: 24rpx;
   text-align: center;
 }
 
 /* 匹配关键字高亮样式 */
 .highlight-text {
-  color: #2b6cb0; /* 蓝色高亮 */
+  color: var(--ik-primary); /* 蓝色高亮 */
   font-weight: bold;
 }
 
 .item-meta {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #999;
+  color: var(--ik-t3);
   text-align: left;
 }
 
 .delete {
   margin-left: 20rpx;
   font-size: 24rpx;
-  color: #e53e3e;
+  color: var(--ik-danger);
   flex-shrink: 0;
 }
 
 .load-more {
   text-align: center;
   font-size: 26rpx;
-  color: #2b6cb0;
+  color: var(--ik-primary);
   padding: 24rpx 0 40rpx;
 }
 
 .empty-search {
   text-align: center;
-  color: #999;
+  color: var(--ik-t3);
   font-size: 28rpx;
   padding: 60rpx 0;
 }
@@ -712,12 +716,12 @@ watch(
 .empty-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #444;
+  color: var(--ik-t2);
 }
 .empty-text {
   margin-top: 16rpx;
   font-size: 26rpx;
-  color: #999;
+  color: var(--ik-t3);
   line-height: 1.6;
 }
 .primary {
@@ -725,8 +729,8 @@ watch(
   height: 84rpx;
   line-height: 84rpx;
   padding: 0 60rpx;
-  background: #2b6cb0;
-  color: #fff;
+  background: var(--ik-primary);
+  color: var(--ik-on-primary);
   font-size: 28rpx;
   border-radius: 42rpx;
   border: none;

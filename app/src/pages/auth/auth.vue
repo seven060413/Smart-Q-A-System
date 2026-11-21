@@ -1,5 +1,6 @@
 <template>
-  <view class="page">
+  <view class="page theme-root" :style="themeVars">
+    <ThemeBackground />
     <!-- 已登录：账号信息 + 退出 -->
     <view v-if="loggedIn" class="card account-card">
       <!-- 👇 修改：支持本地自定义头像 -->
@@ -84,6 +85,7 @@ import { computed, reactive, ref, onMounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app' // 👈 新增引入 onShow
 import { store } from '../../store.js'
 import { login, logout, register } from '../../auth.js'
+import { themeVars, applyNativeNavigationBar } from '../../theme/theme.js'
 
 const mode = ref('login')
 const loading = ref(false)
@@ -114,6 +116,7 @@ const displayName = computed(() => {
 
 // 每次进入页面都读取最新缓存
 onShow(() => {
+  applyNativeNavigationBar()
   const savedAvatar = uni.getStorageSync('user_avatar')
   customAvatar.value = savedAvatar || ''
   
@@ -246,7 +249,7 @@ function goBack() {
   if (pages.length > 1) {
     uni.navigateBack()
   } else {
-    uni.switchTab({ url: '/pages/index/index' })
+    uni.reLaunch({ url: '/pages/index/index' })
   }
 }
 
@@ -267,11 +270,11 @@ function formatTime(iso) {
   min-height: 100vh;
   padding: 48rpx 32rpx calc(48rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
-  background: #f5f6f8;
+  background: var(--ik-bg);
 }
 
 .card {
-  background: #fff;
+  background: var(--ik-card);
   border-radius: 24rpx;
   padding: 40rpx 32rpx;
   box-shadow: 0 8rpx 28rpx rgba(0, 0, 0, 0.06);
@@ -280,7 +283,7 @@ function formatTime(iso) {
 /* 登录 / 注册切换 */
 .tabs {
   display: flex;
-  border-bottom: 1rpx solid #eee;
+  border-bottom: 1rpx solid var(--ik-line);
   margin-bottom: 32rpx;
 }
 .tab {
@@ -288,13 +291,13 @@ function formatTime(iso) {
   text-align: center;
   padding: 20rpx 0;
   font-size: 30rpx;
-  color: #888;
+  color: var(--ik-t3);
   border-bottom: 4rpx solid transparent;
 }
 .tab.active {
-  color: #2b6cb0;
+  color: var(--ik-primary);
   font-weight: 600;
-  border-bottom-color: #2b6cb0;
+  border-bottom-color: var(--ik-primary);
 }
 
 /* 表单 */
@@ -304,7 +307,7 @@ function formatTime(iso) {
 }
 .input {
   height: 88rpx;
-  background: #f2f3f5;
+  background: var(--ik-soft);
   border-radius: 16rpx;
   padding: 0 24rpx;
   font-size: 28rpx;
@@ -314,14 +317,14 @@ function formatTime(iso) {
   margin-top: 12rpx;
   height: 88rpx;
   line-height: 88rpx;
-  background: #2b6cb0;
-  color: #fff;
+  background: var(--ik-primary);
+  color: var(--ik-on-primary);
   font-size: 30rpx;
   border-radius: 44rpx;
   border: none;
 }
 .primary[disabled] {
-  background: #b0c4de;
+  background: var(--ik-soft);
 }
 .primary::after,
 .ghost::after {
@@ -331,25 +334,25 @@ function formatTime(iso) {
   margin-top: 20rpx;
   height: 84rpx;
   line-height: 84rpx;
-  background: #fff;
-  color: #e53e3e;
+  background: var(--ik-card);
+  color: var(--ik-danger);
   font-size: 28rpx;
   border-radius: 42rpx;
-  border: 1rpx solid #feb2b2;
+  border: 1rpx solid rgba(229, 62, 62, 0.32);
 }
 .ghost[disabled] {
-  color: #bbb;
-  border-color: #eee;
+  color: var(--ik-t3);
+  border-color: var(--ik-line);
 }
 .ghost.history-btn {
-  color: #2b6cb0;
-  border-color: #bcd3f0;
+  color: var(--ik-primary);
+  border-color: var(--ik-line);
 }
 
 .error {
-  background: #fff5f5;
-  border: 1rpx solid #feb2b2;
-  color: #c53030;
+  background: rgba(229, 62, 62, 0.08);
+  border: 1rpx solid rgba(229, 62, 62, 0.32);
+  color: var(--ik-danger);
   font-size: 26rpx;
   line-height: 1.5;
   padding: 18rpx 20rpx;
@@ -360,7 +363,7 @@ function formatTime(iso) {
 .hint {
   margin-top: 24rpx;
   font-size: 24rpx;
-  color: #999;
+  color: var(--ik-t3);
   line-height: 1.6;
   text-align: center;
 }
@@ -375,7 +378,7 @@ function formatTime(iso) {
   width: 120rpx;
   height: 120rpx;
   border-radius: 50%;
-  background: #e8f0fb;
+  background: var(--ik-primary-weak);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -386,36 +389,36 @@ function formatTime(iso) {
   width: 120rpx;
   height: 120rpx;
   border-radius: 50%;
-  background: #e8f0fb;
+  background: var(--ik-primary-weak);
   object-fit: cover;
 }
 .display-name {
   margin-top: 20rpx;
   font-size: 36rpx;
   font-weight: 700;
-  color: #2b6cb0;
+  color: var(--ik-primary);
 }
 .username {
   margin-top: 8rpx;
   font-size: 24rpx;
-  color: #999;
+  color: var(--ik-t3);
 }
 .info-list {
   width: 100%;
   margin: 32rpx 0 16rpx;
-  border-top: 1rpx solid #f0f0f0;
+  border-top: 1rpx solid var(--ik-line);
 }
 .info-row {
   display: flex;
   justify-content: space-between;
   padding: 20rpx 0;
-  border-bottom: 1rpx solid #f0f0f0;
+  border-bottom: 1rpx solid var(--ik-line);
   font-size: 26rpx;
 }
 .info-row .label {
-  color: #888;
+  color: var(--ik-t3);
 }
 .info-row .value {
-  color: #333;
+  color: var(--ik-t1);
 }
 </style>

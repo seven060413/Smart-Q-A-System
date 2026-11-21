@@ -77,7 +77,34 @@ def split_generated_answer(text: str) -> tuple[str, list[str]]:
     return answer, exercises
 
 
-def build_prompt(question, node, diag, path, citation, graph) -> str:
+GRADE_LABELS = {
+    1: "一年级",
+    2: "二年级",
+    3: "三年级",
+    4: "四年级",
+    5: "五年级",
+    6: "六年级",
+    7: "七年级",
+    8: "八年级",
+    9: "九年级",
+}
+
+
+def grade_context(student_grade: int | None) -> str:
+    """年级只作为讲解深度的背景，不限制可回答的内容范围。"""
+    label = GRADE_LABELS.get(student_grade)
+    if label is None:
+        return ""
+    return (
+        "【学生背景】\n"
+        f"当前年级：{label}。\n"
+        "请用该年级学生能理解的语言和例子讲解；"
+        "如果问题涉及更高年级内容，仍然完整回答，但先说明需要的前置知识。\n"
+        "年级只是讲解深度的参考，不是内容限制。\n\n"
+    )
+
+
+def build_prompt(question, node, diag, path, citation, graph, student_grade=None) -> str:
     """构建生成提示词：只允许用给定证据回答，面向中小学生，分层输出。"""
     required = [graph.nodes[i]["name"] for i in diag["required"]]
     suggested = [graph.nodes[i]["name"] for i in diag["suggested"]]
@@ -87,7 +114,7 @@ def build_prompt(question, node, diag, path, citation, graph) -> str:
     return f"""你是中小学数学助教，面向中小学生讲解。请严格只用下面提供的图谱证据回答，
 不得编造知识图谱中没有的内容；若证据不足以回答，必须明确说「当前知识库未覆盖该内容」。
 
-【学生问题】
+{grade_context(student_grade)}【学生问题】
 {question}
 
 【本体知识点】
@@ -119,10 +146,17 @@ def build_prompt(question, node, diag, path, citation, graph) -> str:
 """
 
 
-def run_qa(question, graph, kp_nodes, threshold: float | None = None) -> dict:
+def run_qa(
+    question,
+    graph,
+    kp_nodes,
+    threshold: float | None = None,
+    student_grade: int | None = None,
+) -> dict:
     """运行问答流水线（不含大模型生成），返回结构化结果与生成用提示词。
 
     threshold 为空时读取 QA_LINK_THRESHOLD（默认 0.35）；测试可显式传入。
+    student_grade 只影响提示词里的讲解深度，不参与检索过滤。
     """
     if threshold is None:
         threshold = qa_link_threshold()
@@ -178,7 +212,9 @@ def run_qa(question, graph, kp_nodes, threshold: float | None = None) -> dict:
         "learning_path": learning_path,
         "source": citation,
         "refused": False,
-        "prompt": build_prompt(question, node, diag, path, citation, graph),
+        "prompt": build_prompt(
+            question, node, diag, path, citation, graph, student_grade=student_grade
+        ),
         # 内部结构化元数据：供聊天持久化保存知识点 id；API 返回前会移除。
         "_meta": {
             "body": {"id": node.id, "name": node.name},

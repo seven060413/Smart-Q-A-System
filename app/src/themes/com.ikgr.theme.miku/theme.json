@@ -1,0 +1,50 @@
+{
+  "id": "com.ikgr.theme.miku",
+  "name": "初音",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "BiliLite / ikgr",
+  "description": "蓝色调 + 半透明卡片 + 手机/平板双背景图",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#1F2A44",
+      "card": "#1F2A44D9",
+      "t1": "#FFFFFF",
+      "t2": "#C0D0E8",
+      "t3": "#D8E2F0",
+      "line": "#6A8FB044",
+      "primary": "#39C5BB",
+      "primaryWeak": "#39C5BB26",
+      "onPrimary": "#08211F",
+      "block": "#39C5BB",
+      "onBlock": "#08211F",
+      "soft": "#20264066",
+      "inputBg": "#20264066",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "darkColors": {
+      "bg": "#182036",
+      "card": "#1B2540D9",
+      "t1": "#FFFFFF",
+      "t2": "#C0D0E8",
+      "t3": "#D8E2F0",
+      "line": "#6A8FB044",
+      "primary": "#39C5BB",
+      "primaryWeak": "#39C5BB26",
+      "onPrimary": "#08211F",
+      "block": "#39C5BB",
+      "onBlock": "#08211F",
+      "soft": "#1A213866",
+      "inputBg": "#1A213866",
+      "danger": "#FF6B6B",
+      "success": "#4ADE80"
+    },
+    "radius": 16,
+    "darkRadius": 16,
+    "backgroundImage": "/static/themes/miku/phone_bg.jpg",
+    "backgroundImageTablet": "/static/themes/miku/tablet_bg.jpg"
+  }
+}

@@ -1,10 +1,23 @@
 <template>
-  <view>
-    <!-- 1. 侧边栏遮罩层 -->
-    <view v-if="visible && !showAvatarViewer" class="sidebar-mask" @click="closeSidebar"></view>
+  <view class="sidebar-root">
+    <!-- 1. 侧边栏遮罩层（拖动时随位移渐显） -->
+    <view
+      v-if="(visible || dragOffset > 0) && !showAvatarViewer"
+      class="sidebar-mask"
+      :style="maskStyle"
+      @click="closeSidebar"
+    ></view>
 
-    <!-- 2. 侧滑抽屉 -->
-    <view class="sidebar-drawer" :class="{ 'is-open': visible }">
+    <!-- 2. 侧滑抽屉（支持跟手拖出 / 左滑关闭） -->
+    <view
+      class="sidebar-drawer"
+      :class="{ 'is-open': visible, 'is-dragging': dragging || closeDragging }"
+      :style="drawerStyle"
+      @touchstart="onDrawerTouchStart"
+      @touchmove="onDrawerTouchMove"
+      @touchend="onDrawerTouchEnd"
+      @touchcancel="onDrawerTouchEnd"
+    >
       
       <!-- 顶部用户信息区 -->
       <view class="user-profile">
@@ -12,7 +25,6 @@
         <view class="avatar-wrapper" @click="openAvatarViewer">
           <image v-if="customAvatar" :src="customAvatar" class="avatar-img" mode="aspectFill" />
           <view v-else class="avatar-text">{{ userInitial }}</view>
-          <view class="camera-icon">📷</view>
         </view>
         
         <!-- 点击昵称跳转到编辑资料页 -->
@@ -21,17 +33,19 @@
         <text class="username" @click="openAvatarViewer">@{{ username }} · 点击换头像</text>
       </view>
 
-      <!-- 菜单列表区 -->
+      <!-- 菜单列表区：纯文字，分组 + 主色胶囊选中 -->
       <view class="menu-list">
-        <view 
-          v-for="(item, index) in menuItems" 
-          :key="index"
-          class="menu-item"
-          :class="{ 'is-active': currentMenu === item.key }"
-          @click="handleMenuClick(item)"
-        >
-          <view class="menu-icon" :class="{ 'icon-active': currentMenu === item.key }"></view>
-          <text class="menu-text">{{ item.name }}</text>
+        <view v-for="group in menuGroups" :key="group.title" class="menu-group">
+          <text class="menu-group-title">{{ group.title }}</text>
+          <view
+            v-for="item in group.items"
+            :key="item.key"
+            class="menu-item"
+            :class="{ 'is-active': currentMenu === item.key }"
+            @click="handleMenuClick(item)"
+          >
+            <text class="menu-text">{{ item.name }}</text>
+          </view>
         </view>
       </view>
     </view>
@@ -49,12 +63,17 @@
         <view v-else class="big-avatar-text">{{ userInitial }}</view>
       </view>
 
-      <!-- 底部操作区 -->
+      <!-- 底部操作区：自建相册 / 拍照入口 -->
       <view class="viewer-footer">
-        <view class="upload-btn" @click="triggerUpload">
-          <text class="upload-text">上传新头像</text>
-          <!-- 纯 CSS 绘制的精美图片图标 -->
-          <view class="css-icon-image"></view>
+        <view class="viewer-actions">
+          <view class="viewer-action" @click="pickAvatar('album')">
+            <wd-icon name="image" custom-class="viewer-action__icon" />
+            <text>从相册选择</text>
+          </view>
+          <view class="viewer-action" @click="pickAvatar('camera')">
+            <wd-icon name="camera" custom-class="viewer-action__icon" />
+            <text>拍照</text>
+          </view>
         </view>
       </view>
     </view>
@@ -69,16 +88,106 @@ import { store } from '../../store.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  currentMenu: { type: String, default: 'study' }
+  currentMenu: { type: String, default: 'study' },
+  // 宿主页左边缘拖动时传入：0 表示未拖动
+  dragOffset: { type: Number, default: 0 },
+  dragging: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'select-menu'])
 
-const menuItems = [
-  { name: '学习', key: 'study' },
-  { name: '学习路径', key: 'path' },
-  { name: '视频讲解', key: 'video' },
-  { name: '历史会话', key: 'history' },
-  { name: '我的', key: 'profile' }
+// ================= 抽屉跟随手势 =================
+const closeDrag = ref(0)        // 已打开状态下左滑关闭的位移（负数 px）
+const closeDragging = ref(false)
+let drawerStartX = 0
+let drawerStartY = 0
+let drawerAxisLocked = false
+
+function drawerWidth() {
+  try {
+    const width = uni.getSystemInfoSync().windowWidth || 375
+    return Math.min(width * 0.76, 320)
+  } catch (e) {
+    return 280
+  }
+}
+
+const drawerStyle = computed(() => {
+  if (props.visible) {
+    return closeDrag.value ? { transform: `translateX(${closeDrag.value}px)` } : {}
+  }
+  if (props.dragOffset > 0) {
+    return { transform: `translateX(calc(-100% + ${props.dragOffset}px))` }
+  }
+  return {}
+})
+
+const maskStyle = computed(() => {
+  if (props.visible || !props.dragOffset) return {}
+  const opacity = Math.min(1, props.dragOffset / Math.max(1, drawerWidth()))
+  return { opacity }
+})
+
+function onDrawerTouchStart(e) {
+  if (!props.visible || showAvatarViewer.value) return
+  const t = e.touches && e.touches[0]
+  if (!t) return
+  drawerStartX = t.clientX
+  drawerStartY = t.clientY
+  drawerAxisLocked = false
+  closeDrag.value = 0
+  closeDragging.value = true
+}
+
+function onDrawerTouchMove(e) {
+  if (!closeDragging.value) return
+  const t = e.touches && e.touches[0]
+  if (!t) return
+  const dx = t.clientX - drawerStartX
+  const dy = t.clientY - drawerStartY
+  if (!drawerAxisLocked) {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return
+    // 竖向滚动、或向右拖：不拦截
+    if (Math.abs(dy) > Math.abs(dx) || dx > 0) {
+      closeDragging.value = false
+      closeDrag.value = 0
+      return
+    }
+    drawerAxisLocked = true
+  }
+  closeDrag.value = Math.max(-drawerWidth(), Math.min(0, dx))
+}
+
+function onDrawerTouchEnd() {
+  if (!closeDragging.value) return
+  const shouldClose = closeDrag.value < -Math.max(56, drawerWidth() * 0.22)
+  closeDragging.value = false
+  closeDrag.value = 0
+  if (shouldClose) closeSidebar()
+}
+
+watch(() => props.visible, (visible) => {
+  if (visible) return
+  closeDragging.value = false
+  closeDrag.value = 0
+})
+
+const menuGroups = [
+  {
+    title: '导航',
+    items: [
+      { name: '学习', key: 'study' },
+      { name: '自律', key: 'self' },
+      { name: '我的', key: 'profile' },
+    ],
+  },
+  {
+    title: '功能',
+    items: [
+      { name: '学习路径', key: 'path' },
+      { name: '学情诊断', key: 'diagnosis' },
+      { name: '历史会话', key: 'history' },
+    ],
+  },
 ]
 
 // ================= 👇 昵称显示逻辑 👇 =================
@@ -134,12 +243,12 @@ function closeAvatarViewer() {
   showAvatarViewer.value = false
 }
 
-// 在预览页中点击“上传新头像”，才真正触发相册
-function triggerUpload() {
+// 在预览页中选择来源，直接调用对应相册/相机
+function pickAvatar(sourceType) {
   uni.chooseImage({
     count: 1,
     sizeType: ['compressed'],
-    sourceType: ['album', 'camera'],
+    sourceType: [sourceType],
     success: (res) => {
       const tempFilePath = res.tempFilePaths[0]
       
@@ -184,15 +293,18 @@ function handleMenuClick(item) {
 .sidebar-mask {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.4); z-index: 1000;
+  transition: opacity 0.18s ease;
 }
 .sidebar-drawer {
   position: fixed; top: 0; left: 0; bottom: 0;
-  width: 76%; max-width: 320px; background: #fcfcfc; z-index: 1001;
+  width: 76%; max-width: 320px; background: var(--ik-card); z-index: 1001;
   transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   display: flex; flex-direction: column;
   border-top-right-radius: 30px; border-bottom-right-radius: 30px;
 }
 .sidebar-drawer.is-open { transform: translateX(0); }
+/* 跟手拖动时取消过渡，松手后再恢复动画 */
+.sidebar-drawer.is-dragging { transition: none; }
 
 .user-profile { padding: 60px 24px 32px 24px; display: flex; flex-direction: column; }
 .avatar-wrapper {
@@ -201,21 +313,15 @@ function handleMenuClick(item) {
 }
 .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .avatar-text {
-  width: 100%; height: 100%; background: #ffffff; color: #2f6fd0;
+  width: 100%; height: 100%; background: var(--ik-primary-weak); color: var(--ik-primary);
   font-size: 28px; font-weight: 600; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
-.camera-icon {
-  position: absolute; bottom: -2px; right: -2px; width: 22px; height: 22px;
-  background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-}
-
-.nickname { 
-  font-size: 20px; 
-  font-weight: 600; 
-  color: #1f2329; 
-  margin-bottom: 4px; 
+.nickname {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ik-t1);
+  margin-bottom: 4px;
   cursor: pointer;
   display: inline-block;
   width: fit-content;
@@ -224,22 +330,37 @@ function handleMenuClick(item) {
   opacity: 0.7;
 }
 
-.username { font-size: 12px; color: #8a9099; cursor: pointer; }
+.username { font-size: 12px; color: var(--ik-t3); cursor: pointer; }
 
-.menu-list { flex: 1; padding: 0 16px; overflow-y: auto; }
-.menu-item { display: flex; align-items: center; padding: 16px; margin-bottom: 8px; border-radius: 12px; cursor: pointer; }
-.menu-item.is-active { background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
-.menu-icon { width: 14px; height: 14px; border-radius: 4px; background: #dcdfe6; margin-right: 16px; }
-.menu-icon.icon-active { background: #2f6fd0; }
-.menu-text { font-size: 15px; color: #333; }
-.menu-item.is-active .menu-text { color: #1f2329; font-weight: 600; }
+.menu-list { flex: 1; padding: 4px 12px 24px; overflow-y: auto; }
+.menu-group + .menu-group { margin-top: 18px; }
+.menu-group-title {
+  display: block;
+  padding: 0 14px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ik-t3);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 14px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.menu-item:not(.is-active):active { background: var(--ik-soft); }
+.menu-item.is-active { background: var(--ik-primary-weak); }
+.menu-text { font-size: 15px; color: var(--ik-t1); }
+.menu-item.is-active .menu-text { color: var(--ik-primary); font-weight: 600; }
 
 
 /* --- 👇 全屏预览页样式 👇 --- */
 .avatar-viewer-page {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #f5f6f8; 
+  background-color: var(--ik-bg); 
   z-index: 2000; 
   display: flex;
   flex-direction: column;
@@ -252,7 +373,7 @@ function handleMenuClick(item) {
 }
 .close-btn {
   font-size: 24px;
-  color: #333;
+  color: var(--ik-t1);
   cursor: pointer;
   padding: 10px;
   font-weight: 300;
@@ -272,15 +393,15 @@ function handleMenuClick(item) {
   border-radius: 50%; 
   object-fit: cover;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1); 
-  background: #fff;
+  background: var(--ik-card);
 }
 
 .big-avatar-text {
   width: 240px;
   height: 240px;
   border-radius: 50%; 
-  background: #e8f0fb;
-  color: #2f6fd0;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
   font-size: 90px;
   font-weight: bold;
   display: flex;
@@ -291,54 +412,38 @@ function handleMenuClick(item) {
 
 .viewer-footer {
   position: absolute;
-  bottom: 40px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
   left: 20px;
   right: 20px;
 }
 
-.upload-btn {
+.viewer-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #ffffff; 
-  padding: 24px;
+  background: var(--ik-card);
+  border: 1px solid var(--ik-line);
   border-radius: 16px;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04); 
-  border: 1px solid #eee;
-}
-.upload-text {
-  font-size: 16px;
-  font-weight: 500;
-  color: #1f2329;
-}
-
-.css-icon-image {
-  width: 22px;
-  height: 22px;
-  border: 2px solid #8a9099; 
-  border-radius: 4px;
-  position: relative;
   overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
 }
-.css-icon-image::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background-color: #8a9099;
+.viewer-action {
+  flex: 1;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--ik-t1);
+  cursor: pointer;
 }
-.css-icon-image::after {
-  content: '';
-  position: absolute;
-  bottom: -3px;
-  left: -3px;
-  width: 18px;
-  height: 18px;
-  background-color: #8a9099;
-  transform: rotate(45deg);
+.viewer-action + .viewer-action {
+  border-left: 1px solid var(--ik-line);
+}
+.viewer-action:active {
+  background: var(--ik-soft);
+}
+.viewer-action__icon {
+  font-size: 20px;
+  color: var(--ik-primary);
 }
 </style>

@@ -1,0 +1,766 @@
+// ik-guard：专注守护悬浮窗 + 前台服务。
+// v1 不读取前台包名，不申请 PACKAGE_USAGE_STATS；触发来自 App 进入后台。
+// 悬浮窗只占右上角卡片，不遮全屏、不拦截卡片外触摸。
+
+import Context from 'android.content.Context'
+import Intent from 'android.content.Intent'
+import Service from 'android.app.Service'
+import IBinder from 'android.os.IBinder'
+import Build from 'android.os.Build'
+import Settings from 'android.provider.Settings'
+import Uri from 'android.net.Uri'
+import PixelFormat from 'android.graphics.PixelFormat'
+import WindowManager from 'android.view.WindowManager'
+import Gravity from 'android.view.Gravity'
+import View from 'android.view.View'
+import Canvas from 'android.graphics.Canvas'
+import Paint from 'android.graphics.Paint'
+import Color from 'android.graphics.Color'
+import RectF from 'android.graphics.RectF'
+import Typeface from 'android.graphics.Typeface'
+import LinearLayout from 'android.widget.LinearLayout'
+import TextView from 'android.widget.TextView'
+import GradientDrawable from 'android.graphics.drawable.GradientDrawable'
+import NotificationManager from 'android.app.NotificationManager'
+import Notification from 'android.app.Notification'
+import NotificationChannel from 'android.app.NotificationChannel'
+import PendingIntent from 'android.app.PendingIntent'
+import PackageManager from 'android.content.pm.PackageManager'
+import R from 'android.R'
+import { UTSAndroid } from 'io.dcloud.uts'
+
+const PREFS = 'ik_guard'
+const KEY_ACTIVE = 'active'
+const KEY_FOCUS_ID = 'focusId'
+const KEY_END_AT = 'endAt'
+const KEY_TASK = 'task'
+const KEY_STATE = 'state'
+const KEY_BACKGROUND = 'background'
+
+const ACTION_START = 'ik_guard_start'
+const ACTION_BACKGROUND = 'ik_guard_background'
+const ACTION_FOREGROUND = 'ik_guard_foreground'
+const ACTION_UPDATE = 'ik_guard_update'
+const ACTION_STOP = 'ik_guard_stop'
+
+const CHANNEL_GUARD = 'sd_guard'
+const NOTIF_ID = 71001
+
+// ---------- 运行态 ----------
+
+let activeGuard = false
+let guardFocusId = ''
+let guardEndAt = 0
+let guardTask = ''
+let guardState = 'focus'
+let serviceRunning = false
+let appInBackground = false
+let overlayRequested = true
+
+let overlayShowing = false
+let overlayExpanded = true
+let overlayCard: LinearLayout | null = null
+let overlayTimer = 0
+let snoozeTimer = 0
+
+const TITLES = ['我正在看哦', '看见你了', '别走太远']
+
+function dp(ctx: Context, value: number): number {
+  return Math.round(value * ctx.getResources().getDisplayMetrics().density)
+}
+
+function saveState(ctx: Context) {
+  try {
+    const prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    prefs.edit()
+      .putBoolean(KEY_ACTIVE, activeGuard)
+      .putString(KEY_FOCUS_ID, guardFocusId)
+      .putLong(KEY_END_AT, guardEndAt)
+      .putString(KEY_TASK, guardTask)
+      .putString(KEY_STATE, guardState)
+      .putBoolean(KEY_BACKGROUND, appInBackground)
+      .apply()
+  } catch (e) {}
+}
+
+function loadState(ctx: Context) {
+  try {
+    const prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    activeGuard = prefs.getBoolean(KEY_ACTIVE, false)
+    guardFocusId = prefs.getString(KEY_FOCUS_ID, '') ?? ''
+    guardEndAt = prefs.getLong(KEY_END_AT, 0)
+    guardTask = prefs.getString(KEY_TASK, '') ?? ''
+    guardState = prefs.getString(KEY_STATE, 'focus') ?? 'focus'
+    appInBackground = prefs.getBoolean(KEY_BACKGROUND, false)
+  } catch (e) {}
+}
+
+function clearState(ctx: Context) {
+  try {
+    const prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    prefs.edit().clear().apply()
+  } catch (e) {}
+}
+
+function notificationsAllowed(ctx: Context): boolean {
+  if (Build.VERSION.SDK_INT < 33) return true
+  const granted = ctx.getPackageManager().checkPermission('android.permission.POST_NOTIFICATIONS', ctx.getPackageName())
+  return granted == PackageManager.PERMISSION_GRANTED
+}
+
+function canDrawOverlay(ctx: Context): boolean {
+  if (Build.VERSION.SDK_INT < 23) return true
+  return Settings.canDrawOverlays(ctx)
+}
+
+function effectiveState(): string {
+  if (guardState == 'snooze') return 'snooze'
+  if (guardEndAt > 0 && Date.now() >= guardEndAt) return 'due'
+  return 'focus'
+}
+
+function two(n: number): string {
+  return n < 10 ? '0' + n.toString() : n.toString()
+}
+
+function formatRemaining(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return two(Math.floor(total / 60)) + ':' + two(total % 60)
+}
+
+function subtitleText(): string {
+  if (effectiveState() == 'due') return '回来结算'
+  const text = '专注还剩 ' + formatRemaining(guardEndAt - Date.now())
+  if (guardTask == '') return text
+  return text + ' · ' + guardTask
+}
+
+function subtitleFor(state: string): string {
+  if (state == 'due') return '回来结算'
+  if (state == 'snooze') return '五分钟后我再看一眼'
+  return subtitleText()
+}
+
+// ---------- 通知 ----------
+
+function ensureGuardChannel(ctx: Context) {
+  if (Build.VERSION.SDK_INT < 26) return
+  try {
+    const nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    const channel = new NotificationChannel(CHANNEL_GUARD, '专注守护中', NotificationManager.IMPORTANCE_LOW)
+    channel.setDescription('专注进行中，保持守护悬浮窗存活')
+    channel.setShowBadge(false)
+    nm.createNotificationChannel(channel)
+  } catch (e) {}
+}
+
+function launchIntent(ctx: Context): PendingIntent | null {
+  try {
+    const launch = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName())
+    if (launch == null) return null
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    let flags = PendingIntent.FLAG_UPDATE_CURRENT
+    if (Build.VERSION.SDK_INT >= 23) flags = flags | PendingIntent.FLAG_IMMUTABLE
+    return PendingIntent.getActivity(ctx, 0, launch, flags)
+  } catch (e) {
+    return null
+  }
+}
+
+function buildGuardNotification(ctx: Context): Notification {
+  ensureGuardChannel(ctx)
+  let builder: Notification.Builder
+  if (Build.VERSION.SDK_INT >= 26) {
+    builder = new Notification.Builder(ctx, CHANNEL_GUARD)
+  } else {
+    builder = new Notification.Builder(ctx)
+    builder.setPriority(Notification.PRIORITY_LOW)
+  }
+  let icon = ctx.getApplicationInfo().icon
+  if (icon == 0) icon = R.drawable.ic_dialog_info
+  builder.setSmallIcon(icon)
+  builder.setContentTitle('专注守护中')
+  builder.setContentText(subtitleText())
+  builder.setOngoing(true)
+  builder.setOnlyAlertOnce(true)
+  const launch = launchIntent(ctx)
+  if (launch != null) builder.setContentIntent(launch)
+  return builder.build()
+}
+
+function updateNotification(ctx: Context) {
+  try {
+    ensureGuardChannel(ctx)
+    const nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    nm.notify(NOTIF_ID, buildGuardNotification(ctx))
+  } catch (e) {}
+}
+
+function openApp(ctx: Context) {
+  try {
+    const launch = ctx.getPackageManager().getLaunchIntentForPackage(ctx.getPackageName())
+    if (launch == null) return
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(launch)
+  } catch (e) {}
+}
+
+// ---------- 原创眼睛 View ----------
+
+export class EyeView extends View {
+  state: string = 'focus'
+  private paint: Paint = new Paint(Paint.ANTI_ALIAS_FLAG)
+  private tick: number = 0
+  private blink: number = 0
+  private live: boolean = true
+
+  constructor(context: Context) {
+    super(context)
+    this.startTicker()
+    this.scheduleBlink()
+  }
+
+  release() {
+    this.live = false
+  }
+
+  private startTicker() {
+    const self = this
+    const loop = () => {
+      if (!self.live) return
+      self.tick = self.tick + 1
+      self.invalidate()
+      setTimeout(() => {
+        loop()
+      }, 650)
+    }
+    setTimeout(() => {
+      loop()
+    }, 650)
+  }
+
+  // 眨眼改为独立定时器：2–4.2 秒一次，比之前快很多。
+  private scheduleBlink() {
+    const self = this
+    if (!self.live) return
+    const state = effectiveState()
+    if (state == 'due' || state == 'snooze') {
+      setTimeout(() => {
+        self.scheduleBlink()
+      }, 1200)
+      return
+    }
+    const delay = 2000 + Math.random() * 2200
+    setTimeout(() => {
+      if (!self.live) return
+      self.blink = 1.0
+      self.invalidate()
+      setTimeout(() => {
+        if (!self.live) return
+        self.blink = 0.0
+        self.invalidate()
+        self.scheduleBlink()
+      }, 150)
+    }, delay)
+  }
+
+  override onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    const ctx = this.getContext()
+    const w = this.getWidth()
+    const h = this.getHeight()
+    const state = effectiveState()
+
+    let factor = 1.0
+    if (state == 'due') factor = 1.2
+    if (state == 'snooze') factor = 0.55
+
+    const gap = dp(ctx, 6)
+    // 自适应：卡片态尽量放大，气泡态自动缩小避免裁切。
+    let eyeW = dp(ctx, 52)
+    const maxEyeW = Math.max(dp(ctx, 10), (w - gap - dp(ctx, 8)) / 2)
+    if (eyeW > maxEyeW) eyeW = maxEyeW
+    const eyeH = eyeW * (22.0 / 32.0) * factor
+    const totalW = eyeW * 2 + gap
+    const startX = (w - totalW) / 2
+    const top = (h - eyeH) / 2
+
+    const blink = this.blink
+    // 视线约 4 秒绕一圈，动作频率更高。
+    const phase = (this.tick % 6) / 6.0 * Math.PI * 2
+    const gazeX = Math.cos(phase) * dp(ctx, 3)
+    const gazeY = Math.sin(phase) * dp(ctx, 2)
+
+    if (state == 'due') {
+      // 到点脉冲环
+      const pulsePhase = (this.tick % 3) / 3.0
+      this.paint.setStyle(Paint.Style.STROKE)
+      this.paint.setStrokeWidth(dp(ctx, 1.5))
+      this.paint.setColor(Color.parseColor('#5B9BD5'))
+      this.paint.setAlpha(120)
+      canvas.drawCircle(w / 2.0, h / 2.0, dp(ctx, 24) + dp(ctx, 18) * pulsePhase, this.paint)
+      this.paint.setAlpha(255)
+      this.paint.setStyle(Paint.Style.FILL)
+    }
+
+    this.drawEye(canvas, ctx, startX, top, eyeW, eyeH, gazeX, gazeY, blink)
+    this.drawEye(canvas, ctx, startX + eyeW + gap, top, eyeW, eyeH, gazeX, gazeY, blink)
+  }
+
+  private drawEye(
+    canvas: Canvas,
+    ctx: Context,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    gazeX: number,
+    gazeY: number,
+    blink: number
+  ) {
+    const paint = this.paint
+    const rect = new RectF(left, top, left + width, top + height)
+
+    paint.setStyle(Paint.Style.FILL)
+    paint.setColor(Color.parseColor('#F4F1EA'))
+    canvas.drawOval(rect, paint)
+
+    const cx = left + width / 2 + gazeX
+    const cy = top + height / 2 + gazeY
+
+    paint.setColor(Color.parseColor('#5B9BD5'))
+    canvas.drawCircle(cx, cy, dp(ctx, 6.5), paint)
+
+    paint.setColor(Color.parseColor('#14161A'))
+    canvas.drawCircle(cx, cy, dp(ctx, 3), paint)
+
+    paint.setColor(Color.parseColor('#FFFFFF'))
+    canvas.drawCircle(cx - dp(ctx, 2), cy - dp(ctx, 2), dp(ctx, 1.25), paint)
+
+    if (blink > 0) {
+      paint.setColor(Color.parseColor('#1F2937'))
+      canvas.drawRect(left, top, left + width, top + height * blink, paint)
+    }
+  }
+}
+
+// ---------- 悬浮窗卡片 ----------
+
+function roundedBg(color: string, radius: number): GradientDrawable {
+  const drawable = new GradientDrawable()
+  drawable.setColor(Color.parseColor(color))
+  drawable.setCornerRadius(radius)
+  return drawable
+}
+
+function makeText(ctx: Context, text: string, size: number, color: string, bold: boolean): TextView {
+  const view = new TextView(ctx)
+  view.setText(text)
+  view.setTextSize(size)
+  view.setTextColor(Color.parseColor(color))
+  if (bold) view.setTypeface(null, Typeface.BOLD)
+  return view
+}
+
+function makeAction(ctx: Context, text: string, bgColor: string, textColor: string): TextView {
+  const view = new TextView(ctx)
+  view.setText(text)
+  view.setTextSize(13)
+  view.setTextColor(Color.parseColor(textColor))
+  view.setGravity(Gravity.CENTER)
+  view.setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
+  view.setBackground(roundedBg(bgColor, dp(ctx, 16)))
+  view.setClickable(true)
+  return view
+}
+
+function removeOverlay() {
+  if (!overlayShowing) return
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null && overlayCard != null) {
+    try {
+      const wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+      wm.removeView(overlayCard)
+    } catch (e) {}
+  }
+  if (overlayCard != null) {
+    const eye = overlayCard.getChildAt(0)
+    if (eye != null && eye instanceof EyeView) {
+      (eye as EyeView).release()
+    }
+  }
+  overlayCard = null
+  overlayShowing = false
+}
+
+function scheduleCollapse() {
+  overlayTimer = overlayTimer + 1
+  const token = overlayTimer
+  setTimeout(() => {
+    if (token != overlayTimer) return
+    if (overlayShowing && overlayExpanded) showOverlay(false)
+  }, 5000)
+}
+
+function showOverlay(expanded: boolean) {
+  if (!activeGuard) return
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  if (!canDrawOverlay(ctx)) return
+
+  removeOverlay()
+
+  const state = effectiveState()
+  const root = new LinearLayout(ctx)
+  root.setOrientation(LinearLayout.VERTICAL)
+  root.setBackground(roundedBg('#1F2937', dp(ctx, 16)))
+
+  const eye = new EyeView(ctx)
+  eye.state = state
+  if (expanded) {
+    root.setPadding(dp(ctx, 18), dp(ctx, 14), dp(ctx, 18), dp(ctx, 14))
+    const eyeLp = new LinearLayout.LayoutParams(dp(ctx, 176), dp(ctx, 104))
+    eyeLp.gravity = Gravity.CENTER_HORIZONTAL
+    root.addView(eye, eyeLp)
+
+    const titleIndex = Math.abs(Math.floor(Date.now() / 1000)) % TITLES.length
+    const title = makeText(ctx, TITLES[titleIndex], 18, '#FFFFFF', true)
+    const titleLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    titleLp.topMargin = dp(ctx, 6)
+    titleLp.gravity = Gravity.CENTER_HORIZONTAL
+    root.addView(title, titleLp)
+
+    const sub = makeText(ctx, subtitleFor(state), 12, '#D1D5DB', false)
+    const subLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    subLp.topMargin = dp(ctx, 4)
+    subLp.gravity = Gravity.CENTER_HORIZONTAL
+    root.addView(sub, subLp)
+
+    const row = new LinearLayout(ctx)
+    row.setOrientation(LinearLayout.HORIZONTAL)
+    row.setGravity(Gravity.CENTER_HORIZONTAL)
+
+    const back = makeAction(ctx, '回到专注', '#5B9BD5', '#FFFFFF')
+    back.setOnClickListener((v: View) => {
+      openApp(ctx)
+      hideOverlay()
+    })
+    const backLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    backLp.topMargin = dp(ctx, 10)
+    backLp.rightMargin = dp(ctx, 8)
+    row.addView(back, backLp)
+
+    const snooze = makeAction(ctx, '5 分钟后再提醒', '#374151', '#E5E7EB')
+    snooze.setOnClickListener((v: View) => {
+      snoozeForFiveMinutes()
+    })
+    const snoozeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    snoozeLp.topMargin = dp(ctx, 10)
+    row.addView(snooze, snoozeLp)
+
+    root.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+  } else {
+    root.setPadding(dp(ctx, 8), dp(ctx, 8), dp(ctx, 8), dp(ctx, 8))
+    const eyeLp = new LinearLayout.LayoutParams(dp(ctx, 94), dp(ctx, 94))
+    root.addView(eye, eyeLp)
+    root.setOnClickListener((v: View) => {
+      showOverlay(true)
+      scheduleCollapse()
+    })
+  }
+
+  const wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+  let type = WindowManager.LayoutParams.TYPE_PHONE
+  if (Build.VERSION.SDK_INT >= 26) type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+  const flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+  const layoutParams = new WindowManager.LayoutParams(
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    WindowManager.LayoutParams.WRAP_CONTENT,
+    type,
+    flags,
+    PixelFormat.TRANSLUCENT
+  )
+  layoutParams.gravity = Gravity.TOP | Gravity.END
+  layoutParams.x = dp(ctx, 12)
+  layoutParams.y = dp(ctx, 48)
+
+  try {
+    wm.addView(root, layoutParams)
+    overlayCard = root
+    overlayShowing = true
+    overlayExpanded = expanded
+    if (expanded) scheduleCollapse()
+  } catch (e) {
+    console.error('[ik-guard] addView failed', e)
+    overlayCard = null
+    overlayShowing = false
+  }
+}
+
+function hideOverlay() {
+  overlayTimer = overlayTimer + 1
+  removeOverlay()
+  overlayExpanded = true
+}
+
+function snoozeForFiveMinutes() {
+  hideOverlay()
+  guardState = 'snooze'
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null) {
+    saveState(ctx)
+    updateNotification(ctx)
+  }
+  snoozeTimer = snoozeTimer + 1
+  const token = snoozeTimer
+  setTimeout(() => {
+    if (token != snoozeTimer) return
+    if (!activeGuard) return
+    if (appInBackground && overlayRequested) {
+      guardState = 'focus'
+      showOverlay(true)
+    }
+  }, 5 * 60 * 1000)
+}
+
+// ---------- 对外 API ----------
+
+export function getStatus(): UTSJSONObject {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) {
+    return {
+      supported: false,
+      overlay: false,
+      notifications: false,
+      serviceRunning: false,
+      guardEnabled: true,
+      sdk: 0,
+      vendor: ''
+    }
+  }
+  return {
+    supported: true,
+    overlay: canDrawOverlay(ctx),
+    notifications: notificationsAllowed(ctx),
+    serviceRunning: serviceRunning,
+    guardEnabled: true,
+    sdk: Build.VERSION.SDK_INT,
+    vendor: Build.MANUFACTURER
+  }
+}
+
+export function hasOverlayPermission(): boolean {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return false
+  return canDrawOverlay(ctx)
+}
+
+export function openOverlaySettings(): void {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  try {
+    const intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+    intent.setData(Uri.parse('package:' + ctx.getPackageName()))
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+  } catch (e) {
+    try {
+      const intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+      intent.setData(Uri.parse('package:' + ctx.getPackageName()))
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+    } catch (e2) {}
+  }
+}
+
+function sendService(action: string) {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return
+  try {
+    const intent = new Intent(ctx, FocusGuardService::class.java)
+    intent.setAction(action)
+    ctx.startService(intent)
+  } catch (e) {
+    console.error('[ik-guard] sendService failed', e)
+  }
+}
+
+export function startGuard(focusId: string, endAt: number, task: string, title: string): UTSJSONObject {
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx == null) return { ok: false, overlay: false, service: false, reason: 'no-context' }
+
+  activeGuard = true
+  guardFocusId = focusId
+  guardEndAt = endAt
+  guardTask = task
+  guardState = 'focus'
+  overlayRequested = true
+  saveState(ctx)
+
+  let service = false
+  try {
+    const intent = new Intent(ctx, FocusGuardService::class.java)
+    intent.setAction(ACTION_START)
+    if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent)
+    else ctx.startService(intent)
+    service = true
+  } catch (e) {
+    service = false
+  }
+
+  const overlay = canDrawOverlay(ctx)
+  return {
+    ok: service,
+    overlay: overlay,
+    service: service,
+    reason: overlay ? '' : 'no-overlay'
+  }
+}
+
+export function stopGuard(): void {
+  activeGuard = false
+  overlayRequested = false
+  hideOverlay()
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null) {
+    clearState(ctx)
+    sendService(ACTION_STOP)
+    try {
+      ctx.stopService(new Intent(ctx, FocusGuardService::class.java))
+    } catch (e) {}
+  }
+}
+
+export function onAppBackground(): void {
+  if (!activeGuard) return
+  appInBackground = true
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null) saveState(ctx)
+  sendService(ACTION_BACKGROUND)
+}
+
+export function onAppForeground(): void {
+  appInBackground = false
+  // 用户回到 App 后解除“5 分钟后再提醒”的半闭状态。
+  if (guardState == 'snooze') guardState = 'focus'
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null) saveState(ctx)
+  hideOverlay()
+  sendService(ACTION_FOREGROUND)
+}
+
+export function updateGuard(endAt: number, task: string, state: string): void {
+  guardEndAt = endAt
+  guardTask = task
+  if (state != '') guardState = state
+  const ctx = UTSAndroid.getAppContext()
+  if (ctx != null) {
+    saveState(ctx)
+    updateNotification(ctx)
+  }
+  if (overlayShowing) showOverlay(overlayExpanded)
+}
+
+export function takePendingAction(): UTSJSONObject | null {
+  return null
+}
+
+// ---------- 前台服务 ----------
+
+export class FocusGuardService extends Service {
+  private startedForeground: boolean = false
+  private showToken: number = 0
+  private notifToken: number = 0
+
+  override onBind(intent: Intent): IBinder | null {
+    return null
+  }
+
+  override onCreate() {
+    super.onCreate()
+    serviceRunning = true
+    const ctx = UTSAndroid.getAppContext()
+    if (ctx != null) loadState(ctx)
+  }
+
+  override onStartCommand(intent: Intent | null, flags: Int, startId: Int): Int {
+    const ctx = this as Context
+    this.ensureForeground(ctx)
+
+    let action = ACTION_START
+    if (intent != null) {
+      const value = intent.getAction()
+      if (value != null) action = value
+    }
+
+    if (action == ACTION_STOP) {
+      this.cleanup()
+      this.stopSelf()
+      return Service.START_NOT_STICKY
+    }
+
+    if (action == ACTION_BACKGROUND) {
+      this.showToken = this.showToken + 1
+      const token = this.showToken
+      setTimeout(() => {
+        if (token != this.showToken) return
+        if (appInBackground && activeGuard) showOverlay(true)
+      }, 1500)
+    } else if (action == ACTION_FOREGROUND) {
+      this.showToken = this.showToken + 1
+      hideOverlay()
+    } else if (action == ACTION_UPDATE) {
+      updateNotification(ctx)
+      if (overlayShowing) showOverlay(overlayExpanded)
+    } else {
+      updateNotification(ctx)
+      if (appInBackground && activeGuard) showOverlay(true)
+    }
+
+    this.startNotificationTicker(ctx)
+    return Service.START_STICKY
+  }
+
+  private ensureForeground(ctx: Context) {
+    if (this.startedForeground) return
+    try {
+      this.startForeground(NOTIF_ID, buildGuardNotification(ctx))
+      this.startedForeground = true
+    } catch (e) {
+      this.startedForeground = false
+      console.error('[ik-guard] startForeground failed', e)
+    }
+  }
+
+  private startNotificationTicker(ctx: Context) {
+    this.notifToken = this.notifToken + 1
+    const token = this.notifToken
+    const loop = () => {
+      if (token != this.notifToken) return
+      if (!activeGuard) return
+      updateNotification(ctx)
+      setTimeout(() => {
+        loop()
+      }, 60000)
+    }
+    setTimeout(() => {
+      loop()
+    }, 60000)
+  }
+
+  private cleanup() {
+    this.notifToken = this.notifToken + 1
+    this.showToken = this.showToken + 1
+    hideOverlay()
+    activeGuard = false
+    serviceRunning = false
+    try {
+      this.stopForeground(Service.STOP_FOREGROUND_REMOVE)
+    } catch (e) {}
+  }
+
+  override onDestroy() {
+    this.cleanup()
+    super.onDestroy()
+  }
+}

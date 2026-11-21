@@ -1,32 +1,28 @@
-// 底部导航集中配置：当前两项，后续扩展到三、四项时只改这里。
+// 底部导航集中配置：三项（自律/我的都不是独立页面，仅作为 tab 标识）
 export const TAB_INDEX = 'pages/index/index'
-export const TAB_MY = 'pages/my/my'
+export const TAB_SELF = 'pages/selfdiscipline/self' // 逻辑标识，不对应真实路由
+export const TAB_MY = 'pages/my/my' // 逻辑标识，不再对应真实路由
 
+// 顺序固定为 学习 / 自律 / 我的，与 swiper 的 item 索引一一对应。
 export const TAB_ITEMS = [
   { path: TAB_INDEX, title: '学习', icon: 'book' },
+  { path: TAB_SELF, title: '自律', icon: 'clock-circle' },
   { path: TAB_MY, title: '我的', icon: 'user' },
 ]
 
-/** 当前页面的路由（去掉开头的 /），用于同步高亮 */
-export function getCurrentTabPath() {
-  const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
-  const current = pages[pages.length - 1]
-  const route = current && current.route ? String(current.route).replace(/^\//, '') : ''
-  return TAB_ITEMS.some((item) => item.path === route) ? route : TAB_INDEX
+export function tabIndexByPath(path) {
+  const i = TAB_ITEMS.findIndex((item) => item.path === path)
+  return i < 0 ? 0 : i
 }
 
-/** 切换 tab 页面；历史、学习路径、账号等普通页面仍走 navigateTo */
-export function switchTab(path) {
-  if (!path) return
-  uni.switchTab({ url: `/${path}` })
+export function tabPathByIndex(index) {
+  return (TAB_ITEMS[index] || TAB_ITEMS[0]).path
 }
 
-/**
- * 隐藏原生 tabBar，只保留其路由能力。
- * 原生 tabBar 需要在渲染后隐藏，页面 onLoad/onShow 中调用；失败时忽略。
- */
-export function hideNativeTabBar() {
-  try {
-    uni.hideTabBar({ animation: false, fail: () => {} })
-  } catch (e) {}
+/** 从外部页面回到宿主页的指定 tab（替代 uni.switchTab） */
+export function requestTab(index = 0) {
+  uni.reLaunch({ url: `/pages/index/index?tab=${index}` })
 }
+
+/** 原生 tabBar 已删除，保留空实现以防旧页面调用 */
+export function hideNativeTabBar() {}

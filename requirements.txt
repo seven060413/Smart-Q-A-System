@@ -4,6 +4,9 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart>=0.0.9
 
+# 语音朗读（src/tts_api.py 的 TTS 流式接口）
+edge-tts>=7.0.0
+
 # 图存储与检索
 networkx>=3.3
 

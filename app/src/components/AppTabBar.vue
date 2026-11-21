@@ -7,9 +7,9 @@
       placeholder
       safe-area-inset-bottom
       :z-index="100"
-      active-color="#2b6cb0"
-      inactive-color="#8a8f99"
-      custom-style="left: 0; right: 0; bottom: 0; transform: none; width: 100%; max-width: none; border-radius: 0; background: #f5f6f8; box-shadow: none; --wot-tabbar-height: 56px; --wot-tabbar-item-icon-size: 26px; --wot-tabbar-item-title-font-size: 11px;"
+      :active-color="activeColor"
+      :inactive-color="inactiveColor"
+      :custom-style="tabbarStyle"
       @change="handleChange"
     >
       <wd-tabbar-item
@@ -24,7 +24,9 @@
 </template>
 
 <script setup>
-import { TAB_ITEMS, switchTab } from '../tabbar.js'
+import { computed } from 'vue'
+import { TAB_ITEMS } from '../tabbar.js'
+import { tokens } from '../theme/theme.js'
 
 const props = defineProps({
   active: {
@@ -33,16 +35,28 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['change'])
+
+const activeColor = computed(() => tokens.value.primary)
+const inactiveColor = computed(() => tokens.value.t3)
+const tabbarStyle = computed(() =>
+  `left: 0; right: 0; bottom: 0; transform: none; width: 100%; max-width: none;` +
+  `border-radius: 0; background: ${tokens.value.card}; box-shadow: none;` +
+  `--wot-tabbar-height: 56px; --wot-tabbar-item-icon-size: 26px;` +
+  `--wot-tabbar-item-title-font-size: 11px;`
+)
+
 function handleChange({ value }) {
   if (!value || value === props.active) return
-  switchTab(value)
+  emit('change', value)
 }
 </script>
 
 <style>
-/* 与 Wot UI 的 56px + 8px 悬浮间距 + 安全区保持一致，避免首帧占位高度变化 */
+/* 与 Wot UI 实际底栏高度严格一致：56px + 安全区，避免和输入区之间出现空隙 */
 .app-tabbar-wrap {
   flex: 0 0 auto;
-  height: calc(64px + env(safe-area-inset-bottom));
+  height: calc(56px + env(safe-area-inset-bottom));
+  background: var(--ik-card);
 }
 </style>

@@ -32,3 +32,28 @@ def list_videos(
     # 审核结果会变化，禁止浏览器/代理缓存空的 GET 结果。
     response.headers["Cache-Control"] = "no-store"
     return videos.get_videos_for_nodes(conn, node_key, limit=limit)
+
+
+@router.get("/videos/library", summary="视频讲解库（全部已审核视频）")
+def list_video_library(
+    response: Response,
+    q: str = Query(default="", max_length=100, description="搜索标题 / 知识点 / UP主"),
+    book: str | None = Query(
+        default=None,
+        description="教材册：七上 / 七下 / 八上 / 八下 / 九上 / 九下",
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+    conn=Depends(get_db),
+):
+    """分页返回全部已审核视频，供“我的 → 视频讲解”库使用。
+
+    - 游客可访问；
+    - 只返回 approved + active；
+    - 按 video_id 去重；
+    - facets 返回 6 个教材册的计数和章节分组计数。
+    """
+    response.headers["Cache-Control"] = "no-store"
+    return videos.list_videos_library(
+        conn, q=q, book=book, page=page, page_size=page_size
+    )

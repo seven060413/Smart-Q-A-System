@@ -44,6 +44,21 @@ class UpdateProfileRequest(BaseModel):
 
     display_name: str | None = Field(default=None, max_length=32)
     avatar: str | None = Field(default=None, max_length=2000000)
+    # 显式传 null 表示清空年级；完全不传则保持原值（由 model_fields_set 区分）。
+    grade: int | None = Field(default=None, ge=1, le=9)
+
+    @field_validator("grade", mode="before")
+    @classmethod
+    def _grade(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        # bool 是 int 的子类，必须显式拒绝 true/false，避免被当成 1/0。
+        # mode="before" 保证在校验器的宽松转换之前就拦住字符串和布尔值。
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("年级必须是 1-9 的整数")
+        if not 1 <= value <= 9:
+            raise ValueError("年级必须在 1-9 之间")
+        return value
 
     @field_validator("display_name")
     @classmethod
@@ -128,6 +143,7 @@ class UserOut(BaseModel):
     display_name: str
     role: str
     avatar: str = ""
+    grade: int | None = None
     created_at: str
     last_login_at: str | None = None
 
@@ -239,10 +255,12 @@ def update_profile(
     ctx: AuthContext = Depends(get_auth_context),
     conn=Depends(get_db),
 ):
-    """更新当前登录用户的昵称和/或头像。"""
+    """更新当前登录用户的昵称、头像和/或年级。"""
     return auth_service.update_profile(
         conn,
         ctx.user["id"],
         display_name=req.display_name,
         avatar=req.avatar,
+        grade=req.grade,
+        set_grade="grade" in req.model_fields_set,
     )

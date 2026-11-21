@@ -50,7 +50,7 @@ const embedUrl = computed(() =>
   bvid.value ? buildBilibiliEmbedUrl(bvid.value, page.value, aid.value, cid.value) : ''
 )
 const mobileUrl = computed(() =>
-  bvid.value ? buildBilibiliMobileUrl(bvid.value, page.value) : ''
+  bvid.value ? buildBilibiliMobileUrl(bvid.value, page.value, aid.value, cid.value) : ''
 )
 const activeEmbedUrl = computed(() =>
   mobileMode.value ? mobileUrl.value : embedUrl.value

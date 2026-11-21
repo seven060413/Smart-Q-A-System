@@ -45,6 +45,7 @@ def create_conversation(
         ctx.user["id"],
         title=req.title,
         course_id=req.course_id,
+        grade_at_creation=ctx.user.get("grade"),
     )
 
 

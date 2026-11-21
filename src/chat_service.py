@@ -93,6 +93,10 @@ def conversation_to_dict(row) -> dict:
         "last_message_at": row["last_message_at"],
         "deleted_at": row["deleted_at"],
         "message_count": row["message_count"] if "message_count" in keys else None,
+        # 会话创建时的年级快照，仅用于解释历史，不参与聊天内容过滤。
+        "grade_at_creation": (
+            row["grade_at_creation"] if "grade_at_creation" in keys else None
+        ),
     }
 
 
@@ -247,6 +251,7 @@ def create_conversation(
     user_id: str,
     title: str | None = None,
     course_id: str = DEFAULT_COURSE_ID,
+    grade_at_creation: int | None = None,
 ) -> dict:
     """创建空会话；归属由服务端参数决定。
 
@@ -268,8 +273,9 @@ def create_conversation(
                 raise ApiError(400, "COURSE_NOT_FOUND", "课程不存在")
         conn.execute(
             "INSERT INTO conversations "
-            "(id, user_id, course_id, title, created_at, updated_at, last_message_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(id, user_id, course_id, title, created_at, updated_at, last_message_at, "
+            " grade_at_creation) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 conversation_id,
                 user_id,
@@ -278,6 +284,7 @@ def create_conversation(
                 now,
                 now,
                 now,
+                grade_at_creation,
             ),
         )
     return get_conversation(conn, user_id, conversation_id)
@@ -291,7 +298,7 @@ def get_conversation(
 ) -> dict | None:
     sql = (
         "SELECT c.id, c.title, c.course_id, c.created_at, c.updated_at, "
-        "       c.last_message_at, c.deleted_at, "
+        "       c.last_message_at, c.deleted_at, c.grade_at_creation, "
         "       (SELECT COUNT(*) FROM messages m "
         "        WHERE m.conversation_id = c.id) AS message_count "
         "FROM conversations c "
@@ -317,7 +324,7 @@ def list_conversations(
         raise ApiError(400, "INVALID_CURSOR", "分页游标无效")
     sql = (
         "SELECT c.rowid AS seq, c.id, c.title, c.course_id, c.created_at, "
-        "       c.updated_at, c.last_message_at, c.deleted_at, "
+        "       c.updated_at, c.last_message_at, c.deleted_at, c.grade_at_creation, "
         "       (SELECT COUNT(*) FROM messages m "
         "        WHERE m.conversation_id = c.id) AS message_count "
         "FROM conversations c "

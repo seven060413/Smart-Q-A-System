@@ -180,6 +180,83 @@ def test_auth_ask_creates_conversation_and_saves_metadata(chat_client):
     assert all(r["node_key"] for r in kps)
 
 
+def test_chat_injects_profile_grade_and_snapshots_conversation(
+    chat_client, monkeypatch
+):
+    """年级只进提示词；会话创建时写入快照，不改变检索结果。"""
+    client, db_path = chat_client
+    token = _register(client)
+    resp = client.put(
+        "/api/auth/profile", json={"grade": 5}, headers=_auth(token)
+    )
+    assert resp.status_code == 200
+
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return "（测试讲解）"
+
+    monkeypatch.setattr(api.generator, "generate", fake_generate)
+
+    data = _ask(client, token).json()
+    assert "【学生背景】" in captured["prompt"]
+    assert "五年级" in captured["prompt"]
+    assert "不是内容限制" in captured["prompt"]
+
+    conv = _rows(
+        db_path,
+        "SELECT grade_at_creation FROM conversations WHERE id = ?",
+        (data["conversation_id"],),
+    )[0]
+    assert conv["grade_at_creation"] == 5
+
+
+def test_guest_ask_accepts_local_grade_without_persisting(chat_client, monkeypatch):
+    """游客可带本地年级，只影响讲解深度；仍然不落库。"""
+    client, db_path = chat_client
+    captured = {}
+
+    def fake_generate(prompt):
+        captured["prompt"] = prompt
+        return "（测试讲解）"
+
+    monkeypatch.setattr(api.generator, "generate", fake_generate)
+
+    resp = _ask(client, grade=2)
+    assert resp.status_code == 200
+    assert resp.json()["persisted"] is False
+    assert "二年级" in captured["prompt"]
+    assert _rows(db_path, "SELECT COUNT(*) AS c FROM conversations")[0]["c"] == 0
+
+
+@pytest.mark.parametrize("bad_grade", [0, 10, True, "3"])
+def test_ask_rejects_invalid_grade(chat_client, bad_grade):
+    client, _ = chat_client
+    resp = _ask(client, grade=bad_grade)
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_create_conversation_snapshots_grade(chat_client):
+    client, db_path = chat_client
+    token = _register(client)
+    client.put("/api/auth/profile", json={"grade": 7}, headers=_auth(token))
+
+    resp = client.post(
+        "/api/conversations",
+        json={"title": "测试会话"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201
+    row = _rows(
+        db_path,
+        "SELECT grade_at_creation FROM conversations WHERE id = ?",
+        (resp.json()["id"],),
+    )[0]
+    assert row["grade_at_creation"] == 7
+
+
 def test_history_returns_knowledge_point_ids(chat_client):
     """历史消息也要带稳定 node_key，供视频查询使用。"""
     client, _ = chat_client

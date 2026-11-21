@@ -1,0 +1,35 @@
+// Web 端降级：不支持悬浮窗与前台服务。
+
+export function getStatus(): UTSJSONObject {
+  return {
+    supported: false,
+    overlay: false,
+    notifications: false,
+    serviceRunning: false,
+    guardEnabled: true,
+    sdk: 0,
+    vendor: 'web'
+  }
+}
+
+export function hasOverlayPermission(): boolean {
+  return false
+}
+
+export function openOverlaySettings(): void {}
+
+export function startGuard(focusId: string, endAt: number, task: string, title: string): UTSJSONObject {
+  return { ok: false, overlay: false, service: false, reason: 'web-unsupported' }
+}
+
+export function stopGuard(): void {}
+
+export function onAppBackground(): void {}
+
+export function onAppForeground(): void {}
+
+export function updateGuard(endAt: number, task: string, state: string): void {}
+
+export function takePendingAction(): UTSJSONObject | null {
+  return null
+}

@@ -15,18 +15,22 @@ export function buildBilibiliEmbedUrl(bvid, page = 1, aid = null, cid = null) {
   if (aid) parts.push(`aid=${encodeURIComponent(aid)}`)
   parts.push(`bvid=${value}`)
   if (cid) parts.push(`cid=${encodeURIComponent(cid)}`)
-  parts.push(`p=${p}`, 'autoplay=0', 'danmaku=0')
+  parts.push(`p=${p}`, `page=${p}`, 'autoplay=0', 'danmaku=0', 'hideCoverInfo=1')
   return `https://player.bilibili.com/player.html?${parts.join('&')}`
 }
 
 // 备用播放器：官方移动版 H5 页面。仅在官方嵌入播放器报错时由用户手动切换。
-export function buildBilibiliMobileUrl(bvid, page = 1) {
+// aid/cid 能让移动播放器直接定位到具体分P；hideCoverInfo=1 隐藏合集总时长/播放量。
+export function buildBilibiliMobileUrl(bvid, page = 1, aid = null, cid = null) {
   const value = String(bvid || '').trim()
   if (!BVID_RE.test(value)) return ''
   const p = Math.max(1, Number(page) || 1)
+  const parts = ['bvid=' + value, `page=${p}`, `p=${p}`, 'danmaku=0', 'high_quality=1', 'hideCoverInfo=1']
+  if (aid) parts.unshift(`aid=${encodeURIComponent(aid)}`)
+  if (cid) parts.push(`cid=${encodeURIComponent(cid)}`)
   return (
     'https://www.bilibili.com/blackboard/html5mobileplayer.html' +
-    `?bvid=${value}&page=${p}&danmaku=0&high_quality=1`
+    `?${parts.join('&')}`
   )
 }
 

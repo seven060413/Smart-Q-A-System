@@ -1,5 +1,6 @@
 <template>
-  <view class="map-page">
+  <view class="map-page theme-root" :style="themeVars">
+    <ThemeBackground />
     <!-- 顶部信息栏 -->
     <view class="map-header">
       <view class="header-left">
@@ -89,13 +90,13 @@
             <!-- 知识点定义（从API获取） -->
             <view class="card-section" v-if="detailData.definition">
               <text class="section-title">📖 知识点定义</text>
-              <view class="definition-text"><rich-text :nodes="formatDefinition(detailData.definition)" /></view>
+              <MathText class="definition-text" :text="detailData.definition" />
             </view>
 
             <!-- 重要性说明 -->
             <view class="card-section" v-if="detailData.importance">
               <text class="section-title">💡 为什么重要</text>
-              <text class="section-text importance-text">{{ detailData.importance }}</text>
+              <MathText class="section-text importance-text" :text="detailData.importance" />
             </view>
 
             <!-- 教材页码 -->
@@ -108,7 +109,7 @@
             <view class="card-section" v-if="detailData.examples && detailData.examples.length">
               <text class="section-title">📝 学习示例</text>
               <view v-for="(example, i) in detailData.examples" :key="i" class="example-item">
-                <text class="example-content">{{ typeof example === 'string' ? example : example.content || example }}</text>
+                <MathText class="example-content" :text="typeof example === 'string' ? example : example.content || example" />
               </view>
             </view>
 
@@ -128,7 +129,7 @@
                 <view v-for="(q, i) in currentQuiz" :key="i" class="quiz-item" :class="{ 'quiz-correct': quizAnswers[i] === true, 'quiz-wrong': quizAnswers[i] === false }">
                   <view class="quiz-q">
                     <text class="quiz-num">{{ i + 1 }}</text>
-                    <text class="quiz-stem">{{ q.stem || q.name || q }}</text>
+                    <MathText class="quiz-stem" :text="q.stem || q.name || q" inline />
                   </view>
                   
                   <!-- 选项（如果是选择题） -->
@@ -144,7 +145,7 @@
                       @click="selectOption(i, oi)"
                     >
                       <text class="option-letter">{{ ['A','B','C','D'][oi] }}</text>
-                      <text class="option-text">{{ opt }}</text>
+                      <MathText class="option-text" :text="opt" inline />
                     </view>
                   </view>
                   
@@ -163,8 +164,8 @@
                   <!-- 解析（显示答案后） -->
                   <view v-if="showAnswer" class="quiz-analysis">
                     <text class="analysis-label">📋 参考答案</text>
-                    <text class="analysis-text">{{ q.answer || '见解析' }}</text>
-                    <text v-if="q.analysis" class="analysis-detail">{{ q.analysis }}</text>
+                    <MathText class="analysis-text" :text="q.answer || '见解析'" />
+                    <MathText v-if="q.analysis" class="analysis-detail" :text="q.analysis" />
                   </view>
                 </view>
               </view>
@@ -242,7 +243,7 @@
         </view>
         <view v-for="(item, i) in filteredNotebook" :key="i" class="notebook-item" @click="goToNotebookItem(item)">
           <text class="item-name">{{ item.name }}</text>
-          <text class="item-explain">{{ item.explain }}</text>
+          <MathText class="item-explain" :text="item.explain" />
           <text v-if="item.mastered" class="item-mastered">🏆 已掌握</text>
         </view>
       </scroll-view>
@@ -263,10 +264,10 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { askQuestion, attachmentAction, attachmentContent, attachmentStatus, deleteAttachment, listMessages, listVideos, transcribeAudio, uploadAttachment, getKnowledgeDetail, checkAnswer } from '../../api.js'
-import AppTabBar from '../../components/AppTabBar.vue'
-import { TAB_INDEX, hideNativeTabBar } from '../../tabbar.js'
 import { store } from '../../store.js'
+import { themeVars, applyNativeNavigationBar } from '../../theme/theme.js'
 import { formatDuration, buildBilibiliMobileUrl } from '../../video.js'
+import MathText from '../../components/ui/MathText.vue'
 
 // ==================== 数据源 ====================
 const lp = computed(() => store.learningPath || { prerequisites: [], body: '', consolidation: [] })
@@ -386,6 +387,7 @@ watch(() => store.learningPath, (newVal) => {
 // ==================== 页面生命周期 ====================
 // 每次页面显示时重新加载进度，并检查学习路径数据
 onShow(() => {
+  applyNativeNavigationBar()
   loadProgress()
   
   // 如果没有学习路径数据，尝试从缓存恢复
@@ -959,19 +961,6 @@ function onInputFocus(event, index) {
   }, 100)
 }
 
-// 格式化定义文本：将换行符转为<br>，处理特殊字符
-function formatDefinition(text) {
-  if (!text) return ''
-  // 转义HTML特殊字符，然后将换行符转换为<br>
-  let formatted = String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
-    .replace(/\s{2,}/g, (match) => '&nbsp;'.repeat(match.length))
-  return formatted
-}
-
 function resetProgress() {
   uni.showModal({
     title: '重置进度',
@@ -1265,7 +1254,6 @@ page { height: 100%; background: #f5ecd9; }
   width: 100%; box-sizing: border-box;
   word-wrap: break-word; overflow-wrap: anywhere;
 }
-.definition-text >>> .rich-text { width: 100%; }
 .importance-text { color: #8a6d3b; font-style: italic; }
 
 /* 示例 */

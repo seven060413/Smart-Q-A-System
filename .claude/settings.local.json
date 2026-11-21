@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(powershell.exe -NoProfile -Command 'Get-Process | Where-Object { $_.ProcessName -like '\\\\''*HBuilder*'\\\\'' -or $_.ProcessName -like '\\\\''*node*'\\\\'' } | Select-Object Id, ProcessName, StartTime | Format-Table -AutoSize')"
-    ]
-  }
-}

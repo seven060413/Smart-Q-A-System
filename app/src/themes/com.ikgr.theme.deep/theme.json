@@ -1,0 +1,48 @@
+{
+  "id": "com.ikgr.theme.deep",
+  "name": "深海夜",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "author": "ikgr",
+  "description": "深蓝夜间，低调不刺眼",
+  "permissions": ["ui"],
+  "theme": {
+    "colors": {
+      "bg": "#EEF3FA",
+      "card": "#FFFFFF",
+      "t1": "#1B2A3F",
+      "t2": "#4C5E76",
+      "t3": "#8494A8",
+      "line": "#DDE5F0",
+      "primary": "#3F6FA8",
+      "primaryWeak": "#E5EDF8",
+      "onPrimary": "#FFFFFF",
+      "block": "#1B2A3F",
+      "onBlock": "#FFFFFF",
+      "soft": "#EBF0F7",
+      "inputBg": "#FFFFFF",
+      "danger": "#D64545",
+      "success": "#2E8B62"
+    },
+    "darkColors": {
+      "bg": "#0B1220",
+      "card": "#141D2E",
+      "t1": "#E6EDF7",
+      "t2": "#A8B6C9",
+      "t3": "#7C8CA1",
+      "line": "#273247",
+      "primary": "#6FA8E0",
+      "primaryWeak": "#1A2A42",
+      "onPrimary": "#071020",
+      "block": "#E6EDF7",
+      "onBlock": "#0B1220",
+      "soft": "#1A2435",
+      "inputBg": "#172132",
+      "danger": "#FF7A7A",
+      "success": "#57D39B"
+    },
+    "radius": 24,
+    "darkRadius": 24
+  }
+}

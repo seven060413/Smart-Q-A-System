@@ -1,0 +1,36 @@
+{
+  "id": "ik-guard",
+  "displayName": "IK 专注守护",
+  "version": "1.0.0",
+  "description": "专注守护悬浮窗与前台服务（原创眼睛）",
+  "keywords": ["专注", "悬浮窗", "前台服务"],
+  "engines": {
+    "HBuilderX": "^4.41.0"
+  },
+  "dcloudext": {
+    "type": "uts"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "n",
+        "aliyun": "n",
+        "alipay": "n"
+      },
+      "client": {
+        "App": {
+          "app-vue": "y",
+          "app-nvue": "y"
+        },
+        "H5-mobile": {
+          "Safari": "n",
+          "Android": "n",
+          "iOS": "n",
+          "微信浏览器": "n"
+        }
+      }
+    }
+  }
+}

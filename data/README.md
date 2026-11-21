@@ -46,3 +46,27 @@ tests_skill、relates_to、is_part_of、is_a、leads_to。
 
 数学全量图谱含 1470 个 Concept + 428 个 Skill = **1898 个知识点**，超出项目
 「知识点 ≤ 200」约束；后续步骤将按年级（如 `math_7a_rjb_*`）或教材筛选出 ≤200 的子集。
+
+## 新增数据集：pansgo 数学 K12（1–14 年级，2026-11-21）
+
+| 项 | 内容 |
+| -- | -- |
+| 数据集 | cn-math-taxonomy（Aifeng / `xiaoyang111222`，站点 math.pansgo.com） |
+| 仓库 | https://github.com/xiaoyang111222/cn-math-taxonomy |
+| 锁定提交 | `f4721bb947d95823ee8a41b2507ad411ff66e5e0` |
+| 授权 | **CC BY-NC 4.0**（署名—非商业性使用），仅限非商业用途 |
+| 产物 | `processed/pansgo_math_k12.json`（870 节点 / 1,459 边）、`processed/pansgo_math_k12_questions.json`（3,627 题）、`processed/pansgo_math_k12_catalog.json`（年级/册/章目录） |
+
+年级覆盖 1–9 年级加高中（高一、高二、选必一、选必二、选必三）。获取与构建见
+[docs/pansgo-math-k12.md](../docs/pansgo-math-k12.md)。原始过滤数据在 `raw/pansgo_k12/`，
+被 `.gitignore` 忽略，可随时重新生成。
+
+题库导入数据库：
+
+```bash
+.venv/Scripts/python.exe scripts/migrate.py
+.venv/Scripts/python.exe scripts/seed_pansgo_questions.py
+```
+
+**质量提示**：知识点与题目由该项目的 AI 生成流程产出，未经一线教师审核；仅适合
+做薄弱点筛查，不能作为权威答案或正式测评依据。

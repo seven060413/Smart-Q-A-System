@@ -1,0 +1,36 @@
+{
+  "id": "ik-reminder",
+  "displayName": "IK 本地提醒",
+  "version": "1.0.0",
+  "description": "精确到点的本地通知（AlarmManager + 静态 Receiver）",
+  "keywords": ["提醒", "通知", "闹钟"],
+  "engines": {
+    "HBuilderX": "^4.41.0"
+  },
+  "dcloudext": {
+    "type": "uts"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "n",
+        "aliyun": "n",
+        "alipay": "n"
+      },
+      "client": {
+        "App": {
+          "app-vue": "y",
+          "app-nvue": "y"
+        },
+        "H5-mobile": {
+          "Safari": "n",
+          "Android": "n",
+          "iOS": "n",
+          "微信浏览器": "n"
+        }
+      }
+    }
+  }
+}
