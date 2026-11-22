@@ -482,6 +482,53 @@ function plusReadDir(path) {
   }))
 }
 
+/** readEntries 在部分设备上分批返回，这里读到空批次为止。 */
+function plusReadAllEntries(path) {
+  return plusResolve(path).then((entry) => new Promise((resolve, reject) => {
+    const reader = entry.createReader()
+    const all = []
+    const read = () => reader.readEntries((batch) => {
+      if (!batch || !batch.length) {
+        resolve(all)
+        return
+      }
+      all.push(...batch)
+      read()
+    }, reject)
+    read()
+  }))
+}
+
+/**
+ * App 端解压后校验：文件数、单文件大小、解压后总大小、目录层级。
+ * H5 端 installFromBytes 已有同等校验；App 端 plus.zip 不会替我们做。
+ */
+async function plusDirStats(dir, depth = 0) {
+  assert(depth <= 12, '压缩包目录层级过深')
+  const entries = await plusReadAllEntries(dir)
+  let count = 0
+  let total = 0
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      const sub = await plusDirStats(`${dir}/${entry.name}`, depth + 1)
+      count += sub.count
+      total += sub.total
+      assert(count <= MAX_FILES, '压缩包内文件过多')
+      assert(total <= MAX_ZIP_BYTES, '解压后体积过大')
+      continue
+    }
+    count += 1
+    assert(count <= MAX_FILES, '压缩包内文件过多')
+    const size = await new Promise((resolve) => {
+      entry.file((file) => resolve(Number(file.size) || 0), () => resolve(0))
+    })
+    assert(size <= MAX_FILE_BYTES, `文件过大：${entry.name || ''}`)
+    total += size
+    assert(total <= MAX_ZIP_BYTES, '解压后体积过大')
+  }
+  return { count, total }
+}
+
 function plusDecompress(zipPath, targetDir) {
   return new Promise((resolve, reject) => {
     plus.zip.decompress(zipPath, targetDir, resolve, reject)
@@ -573,9 +620,10 @@ async function installFromZipPath(zipPath) {
   await plusEnsureDir(APP_ROOT)
   try {
     await plusDecompress(zipPath, tmpDir)
+    await plusDirStats(tmpDir)
   } catch (e) {
     await plusRemoveDir(tmpDir)
-    fail('解压失败，请确认 zip 文件有效')
+    fail(e && e.message ? e.message : '解压失败，请确认 zip 文件有效')
   }
 
   const tmpBase = await findAppBase(tmpDir)

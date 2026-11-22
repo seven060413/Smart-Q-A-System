@@ -152,6 +152,40 @@ export function createAppStorage() {
     })
   }
 
+  async function insertSqliteRow(table, row) {
+    const keys = Object.keys(row || {})
+    if (!keys.length) return
+    const cols = keys.map(quoteId).join(', ')
+    const values = keys.map((key) => sqlValue(row[key])).join(', ')
+    await executeSql(
+      `INSERT OR REPLACE INTO ${quoteId(table)} (${cols}) VALUES (${values})`
+    )
+  }
+
+  const LEGACY_IMPORT_KEY = 'legacy_json_imported'
+
+  /**
+   * 旧版本在 SQLite 不可用时会把整个库放到 uni storage 的 ikgr_sd_v1。
+   * 第一次成功打开 SQLite 时把旧 JSON 数据导入，避免升级后看起来“数据丢了”。
+   */
+  async function importLegacyJsonIfNeeded() {
+    const marker = await selectSql(
+      `SELECT value FROM settings WHERE key = '${LEGACY_IMPORT_KEY}' LIMIT 1`
+    )
+    if (marker && marker.length) return
+
+    await fallback.init()
+    const data = await fallback.exportAll()
+    for (const table of TABLES) {
+      const rows = data && data[table]
+      if (!Array.isArray(rows) || !rows.length) continue
+      for (const row of rows) await insertSqliteRow(table, row)
+    }
+    await executeSql(
+      `INSERT OR REPLACE INTO settings (key, value) VALUES ('${LEGACY_IMPORT_KEY}', '1')`
+    )
+  }
+
   async function ensureOpen() {
     if (!initPromise) {
       initPromise = (async () => {
@@ -175,6 +209,12 @@ export function createAppStorage() {
           try {
             await executeSql(sql)
           } catch (e) {}
+        }
+        // 迁移失败只记录，不整体降级；下次启动会重试（marker 未写入）。
+        try {
+          await importLegacyJsonIfNeeded()
+        } catch (e) {
+          console.error('[ikgr_sd] 旧 JSON 数据导入失败', e)
         }
       })()
     }
@@ -212,12 +252,7 @@ export function createAppStorage() {
     async insert(table, row) {
       return withSqlite(
         async () => {
-          const keys = Object.keys(row)
-          const cols = keys.map(quoteId).join(', ')
-          const values = keys.map((key) => sqlValue(row[key])).join(', ')
-          await executeSql(
-            `INSERT OR REPLACE INTO ${quoteId(table)} (${cols}) VALUES (${values})`
-          )
+          await insertSqliteRow(table, row)
           return { ...row }
         },
         () => fallback.insert(table, row)
@@ -227,14 +262,7 @@ export function createAppStorage() {
     async insertMany(table, rows) {
       return withSqlite(
         async () => {
-          for (const row of rows || []) {
-            const keys = Object.keys(row)
-            const cols = keys.map(quoteId).join(', ')
-            const values = keys.map((key) => sqlValue(row[key])).join(', ')
-            await executeSql(
-              `INSERT OR REPLACE INTO ${quoteId(table)} (${cols}) VALUES (${values})`
-            )
-          }
+          for (const row of rows || []) await insertSqliteRow(table, row)
         },
         () => fallback.insertMany(table, rows)
       )
@@ -274,6 +302,13 @@ export function createAppStorage() {
           for (const table of TABLES) {
             await executeSql(`DELETE FROM ${quoteId(table)}`)
           }
+          // 同时清掉旧 JSON，避免下次启动把已清空的数据重新导入。
+          try {
+            await fallback.clearAll()
+          } catch (e) {}
+          await executeSql(
+            `INSERT OR REPLACE INTO settings (key, value) VALUES ('${LEGACY_IMPORT_KEY}', '1')`
+          )
         },
         () => fallback.clearAll()
       )
