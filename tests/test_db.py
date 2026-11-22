@@ -1,6 +1,7 @@
 """阶段 2：数据库迁移（schema_migrations / 建表）测试。"""
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -50,6 +51,19 @@ def test_migrations_are_idempotent(conn):
     second = apply_migrations(conn, MIGRATIONS)
     assert second == []
     assert applied_versions(conn) == {m.version for m in MIGRATIONS}
+
+
+def test_connection_can_be_used_across_threads():
+    """FastAPI 线程池可能在线程 A 建连接、线程 B 使用，不能抛同线程错误。"""
+    c = db_module.connect(":memory:")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            value = pool.submit(
+                lambda: c.execute("SELECT 1").fetchone()[0]
+            ).result()
+        assert value == 1
+    finally:
+        c.close()
 
 
 def test_foreign_keys_enforced(conn):

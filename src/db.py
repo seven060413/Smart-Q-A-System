@@ -46,7 +46,11 @@ def connect(path: Union[str, Path, None] = None) -> sqlite3.Connection:
     resolved = resolve_db_path(path)
     if str(resolved) != ":memory:":
         resolved.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(resolved))
+    # FastAPI 会把同步依赖和同步路由放进线程池，二者可能落在不同线程；每个请求
+    # 仍然独占自己的连接，因此关闭「同线程」检查是安全的。否则会偶发
+    # sqlite3.ProgrammingError: SQLite objects created in a thread can only be
+    # used in that same thread.
+    conn = sqlite3.connect(str(resolved), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
