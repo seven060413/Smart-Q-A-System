@@ -90,7 +90,13 @@ def run_migrate(db_path: str | None, keep: int = 10) -> None:
             print("无待应用的迁移，数据库已是最新。")
 
         # 幂等的数据补齐：旧单点/章节会话没有年级，按知识点反推。
-        updated = quiz_service.backfill_grade_snapshots(conn)
+        # 新服务器首部署时诊断图谱可能还没上传；迁移本身已成功，只跳过回填，
+        # 不能因为可选数据缺失让迁移命令异常退出。
+        try:
+            updated = quiz_service.backfill_grade_snapshots(conn)
+        except Exception as exc:  # noqa: BLE001 - 回填是可选步骤，失败不应阻塞迁移
+            print(f"跳过诊断会话年级回填（{type(exc).__name__}: {exc}）")
+            updated = 0
         if updated:
             print(f"已为 {updated} 个历史诊断会话补齐年级。")
 

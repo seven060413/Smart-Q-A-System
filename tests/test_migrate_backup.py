@@ -45,3 +45,27 @@ def test_keep_zero_does_not_prune(tmp_path):
 
     assert module._prune_migration_backups(backup_dir, keep=0) == []
     assert len(list(backup_dir.iterdir())) == 2
+
+
+def test_run_migrate_survives_missing_diagnosis_dataset(tmp_path, monkeypatch, capsys):
+    """新服务器首部署没有诊断图谱时，迁移照常完成，只跳过年级回填。"""
+    module = _load_migrate_module()
+    from src import db as db_module
+    from src import quiz_service
+    from src.errors import ApiError
+    from src.schema import MIGRATIONS, applied_versions
+
+    def _missing():
+        raise ApiError(503, "DATASET_UNAVAILABLE", "诊断图谱未生成")
+
+    monkeypatch.setattr(quiz_service, "load_dataset", _missing)
+
+    db_path = tmp_path / "migrate.db"
+    module.run_migrate(str(db_path))  # 不应抛出
+
+    conn = db_module.connect(str(db_path))
+    try:
+        assert applied_versions(conn) == {m.version for m in MIGRATIONS}
+    finally:
+        conn.close()
+    assert "跳过诊断会话年级回填" in capsys.readouterr().out

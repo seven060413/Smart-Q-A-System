@@ -15,6 +15,8 @@ export function useVoiceInput(onText) {
   let session = 0
   let pendingCancel = false
   let starting = false
+  // 按住说话：用户已经松手。用于取消“权限弹窗还没结束”时的那次录音。
+  let released = false
 
   function startTimer() {
     stopTimer()
@@ -38,6 +40,7 @@ export function useVoiceInput(onText) {
     stopTimer()
     pendingCancel = false
     starting = false
+    released = false
     state.value = 'idle'
     seconds.value = 0
   }
@@ -390,6 +393,11 @@ export function useVoiceInput(onText) {
         reset()
         return
       }
+      // 授权期间用户已经松手：取消这次录音，避免权限弹窗关闭后还在录。
+      if (released) {
+        reset()
+        return
+      }
       session += 1
       pendingCancel = false
       recorder.start({ format: 'mp3', sampleRate: 16000, duration: MAX_SECONDS * 1000 })
@@ -426,7 +434,7 @@ export function useVoiceInput(onText) {
       return
     }
 
-    if (pendingCancel) {
+    if (pendingCancel || released) {
       stopTracks(stream)
       reset()
       return
@@ -521,12 +529,38 @@ export function useVoiceInput(onText) {
   // #endif
   // #endif
 
+  async function start() {
+    if (state.value !== 'idle' || starting) return
+    released = false
+    await startRecording()
+  }
+
+  /**
+   * 松手：真正开始录音了就停止并识别；还在申请权限/启动中则直接放弃。
+   */
+  function finish() {
+    if (state.value === 'recording') {
+      stopRecording()
+      return
+    }
+    if (state.value === 'starting') {
+      released = true
+      pendingCancel = true
+      session += 1
+      stopTimer()
+      state.value = 'idle'
+      seconds.value = 0
+      starting = false
+    }
+  }
+
   async function toggle() {
     if (state.value === 'recording') {
       stopRecording()
       return
     }
     if (state.value !== 'idle' || starting) return
+    released = false
     await startRecording()
   }
 
@@ -543,6 +577,7 @@ export function useVoiceInput(onText) {
 
   onUnmounted(() => {
     pendingCancel = true
+    released = true
     session += 1
     stopTimer()
     // #ifdef H5
@@ -554,6 +589,8 @@ export function useVoiceInput(onText) {
     supported,
     state,
     seconds,
+    start,
+    finish,
     toggle,
     cancel,
   }

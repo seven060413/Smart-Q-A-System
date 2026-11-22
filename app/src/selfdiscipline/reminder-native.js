@@ -1,19 +1,13 @@
 // App 端提醒后端：封装 UTS 插件 ik-reminder。该文件只在 APP-PLUS 下被引用。
 
 // #ifdef APP-PLUS
-import * as native from '@/uni_modules/ik-reminder'
+// 临时禁用：ik-reminder UTS 模块在当前 HBuilderX 版本编译失败，源码已移到
+// app/uts-disabled/ik-reminder。恢复时把目录移回 src/uni_modules 并恢复此 import。
+// import * as native from '@/uni_modules/ik-reminder'
 // #endif
 
 function call(name, fallback, ...args) {
-  // #ifdef APP-PLUS
-  try {
-    if (native && typeof native[name] === 'function') {
-      return native[name](...args)
-    }
-  } catch (e) {
-    console.error(`[ik-reminder] ${name} 调用失败`, e)
-  }
-  // #endif
+  // 原生精确提醒暂不可用，返回降级值；通知权限申请仍走下面的 plus.android。
   return fallback
 }
 

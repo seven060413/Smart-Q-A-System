@@ -270,7 +270,7 @@ const pluginItems = computed(() => pluginMenus.map((m) => ({
 
 function showAbout() {
   uni.showModal({
-    title: '数学知识问答',
+    title: '络思',
     content: 'K12 数学知识图谱问答助手\n前端：uni-app + Vue 3 + wot-ui',
     showCancel: false,
   })

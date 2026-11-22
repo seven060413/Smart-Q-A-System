@@ -55,7 +55,7 @@
 
     <view class="composer">
       <view v-if="voiceState === 'recording'" class="record-row">
-        <text class="record-text">正在录音 · {{ voiceSeconds }}s</text>
+        <text class="record-text">{{ voiceWillCancel ? '松开取消' : `正在录音 · ${voiceSeconds}s` }}</text>
         <text class="record-cancel" @click="cancelVoice">取消</text>
       </view>
       <view v-else-if="voiceState === 'uploading'" class="record-row">
@@ -78,10 +78,32 @@
         />
         <button
           class="voice-btn"
-          :class="{ 'is-recording': voiceState === 'recording' }"
-          :disabled="!loggedIn || sending || voiceState === 'uploading' || voiceState === 'starting'"
-          @click="onVoice"
-        >{{ voiceState === 'recording' ? '■' : '🎤' }}</button>
+          :class="{ 'is-recording': voiceState === 'recording', 'will-cancel': voiceWillCancel }"
+          :disabled="!loggedIn || sending || voiceState === 'uploading'"
+          aria-label="按住说话，松开发送"
+          @touchstart.stop.prevent="onVoiceStart"
+          @touchmove.stop.prevent="onVoiceMove"
+          @touchend.stop.prevent="onVoiceEnd"
+          @touchcancel.stop.prevent="onVoiceCancel"
+          @mousedown.stop.prevent="onVoiceStart"
+          @mousemove.stop.prevent="onVoiceMove"
+          @mouseup.stop.prevent="onVoiceEnd"
+          @mouseleave="onVoiceMouseLeave"
+        >
+          <svg class="voice-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <g
+              transform="rotate(90 12 12)"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M2 8.82a15 15 0 0 1 20 0" />
+              <path d="M5 12.859a10 10 0 0 1 14 0" />
+              <path d="M8.5 16.429a5 5 0 0 1 7 0" />
+            </g>
+          </svg>
+        </button>
         <button
           class="send-btn"
           :disabled="!loggedIn || sending || !draftText.trim()"
@@ -120,13 +142,20 @@ const {
   supported: voiceSupported,
   state: voiceState,
   seconds: voiceSeconds,
-  toggle: toggleVoice,
+  start: startVoice,
+  finish: finishVoice,
   cancel: cancelVoice,
 } = useVoiceInput((text) => {
-  draftText.value = draftText.value ? `${draftText.value} ${text}` : text
-  uni.showToast({ title: '识别完成，可编辑后发送', icon: 'none' })
+  const current = draftText.value.trim()
+  draftText.value = current ? `${current} ${text}` : text
+  uni.showToast({ title: '识别完成，正在发送', icon: 'none' })
   scrollBottom()
+  send()
 })
+
+// 按住说话：上滑超过阈值松手即取消
+const voiceWillCancel = ref(false)
+let voiceStartY = 0
 
 function newId() {
   seq += 1
@@ -268,7 +297,8 @@ onShow(async () => {
 })
 
 onHide(() => {
-  if (voiceState.value === 'recording') cancelVoice()
+  voiceWillCancel.value = false
+  if (voiceState.value === 'recording' || voiceState.value === 'starting') cancelVoice()
 })
 
 function requireLogin() {
@@ -406,13 +436,62 @@ async function onConfirm(msg, items) {
   }
 }
 
-function onVoice() {
-  if (!requireLogin()) return
+function onVoiceStart(e) {
+  if (sending.value) {
+    uni.showToast({ title: '正在整理，请稍后', icon: 'none' })
+    return
+  }
   if (!voiceSupported.value) {
     uni.showToast({ title: '当前平台不支持语音输入', icon: 'none' })
     return
   }
-  toggleVoice()
+  if (voiceState.value !== 'idle') return
+
+  const point = (e.touches && e.touches[0]) || e
+  voiceStartY = (point && (point.clientY != null ? point.clientY : point.pageY)) || 0
+  voiceWillCancel.value = false
+  try {
+    uni.vibrateShort({ type: 'light' })
+  } catch (err) {}
+  startVoice()
+}
+
+function onVoiceMove(e) {
+  if (voiceState.value !== 'recording' && voiceState.value !== 'starting') return
+  const point = (e.touches && e.touches[0]) || e
+  if (!point) return
+  const y = point.clientY != null ? point.clientY : point.pageY
+  if (typeof y !== 'number') return
+
+  const next = voiceStartY - y > 80
+  if (next !== voiceWillCancel.value) {
+    voiceWillCancel.value = next
+    try {
+      uni.vibrateShort({ type: next ? 'heavy' : 'light' })
+    } catch (err) {}
+  }
+}
+
+function onVoiceEnd() {
+  if (voiceWillCancel.value) {
+    voiceWillCancel.value = false
+    cancelVoice()
+    return
+  }
+  voiceWillCancel.value = false
+  finishVoice()
+}
+
+function onVoiceCancel() {
+  voiceWillCancel.value = false
+  cancelVoice()
+}
+
+function onVoiceMouseLeave() {
+  if (voiceState.value === 'recording' || voiceState.value === 'starting') {
+    voiceWillCancel.value = false
+    cancelVoice()
+  }
 }
 </script>
 
@@ -613,13 +692,36 @@ function onVoice() {
   border: none;
 }
 .voice-btn {
-  background: var(--ik-soft);
-  color: var(--ik-t1);
-  padding: 0 14rpx;
+  flex: 0 0 76rpx;
+  width: 76rpx;
+  height: 76rpx;
+  min-width: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border-radius: 50%;
+  background: var(--ik-primary-weak);
+  color: var(--ik-primary);
 }
 .voice-btn.is-recording {
   background: var(--ik-danger);
   color: var(--ik-on-primary);
+}
+.voice-btn.will-cancel {
+  background: var(--ik-soft);
+  color: var(--ik-danger);
+}
+/* uni-app 默认的 disabled 样式会把图标变成灰块，这里统一成柔和的禁用态 */
+.voice-btn[disabled] {
+  background: var(--ik-soft);
+  color: var(--ik-t3);
+  opacity: 1;
+}
+.voice-icon {
+  width: 40rpx;
+  height: 40rpx;
+  display: block;
 }
 .send-btn {
   padding: 0 24rpx;

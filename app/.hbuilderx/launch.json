@@ -2,6 +2,8 @@
     "version" : "1.0",
     "configurations" : [
         {
+            "customPlaygroundType" : "device",
+            "localRepoPath" : "D:/IKGR-system-eands/app",
             "playground" : "standard",
             "type" : "uni-app:app-android"
         }

@@ -4,21 +4,16 @@
 import * as repo from './repository.js'
 
 // #ifdef APP-PLUS
-import * as nativeGuard from '@/uni_modules/ik-guard'
+// 临时禁用：ik-guard UTS 模块在当前 HBuilderX 版本编译失败，源码已移到
+// app/uts-disabled/ik-guard。恢复时把目录移回 src/uni_modules 并恢复此 import。
+// import * as nativeGuard from '@/uni_modules/ik-guard'
 // #endif
 
 let activeSession = null
 
 function call(name, fallback, ...args) {
-  // #ifdef APP-PLUS
-  try {
-    if (nativeGuard && typeof nativeGuard[name] === 'function') {
-      return nativeGuard[name](...args)
-    }
-  } catch (e) {
-    console.error(`[ik-guard] ${name} 调用失败`, e)
-  }
-  // #endif
+  // 原生悬浮窗/前台服务暂不可用，直接返回降级值；
+  // 专注计时、打卡和统计仍由页面与本地数据库负责。
   return fallback
 }
 

@@ -11,7 +11,7 @@
       "path": "pages/index/index",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "数学知识问答"
+        "navigationBarTitleText": "络思"
       }
     },
     {
@@ -165,7 +165,7 @@
   ],
   "globalStyle": {
     "navigationBarTextStyle": "white",
-    "navigationBarTitleText": "数学知识问答",
+    "navigationBarTitleText": "络思",
     "navigationBarBackgroundColor": "#2b6cb0",
     "backgroundColor": "#f5f6f8"
   },
