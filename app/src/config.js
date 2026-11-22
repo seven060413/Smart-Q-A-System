@@ -3,7 +3,7 @@
 
 
 
-export const BASE_URL = 'http://127.0.0.1:18082'
+export const BASE_URL = 'https://seventeen17.com.cn'
 
 
 

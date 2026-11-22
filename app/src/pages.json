@@ -1,181 +1,188 @@
+
 {
-	"pages": [
-		{
-			"path": "pages/index/index",
-			"style": {
-				"navigationStyle": "custom",
-				"navigationBarTitleText": "数学知识问答"
-			}
-		},
-		{
-			"path": "pages/crop/crop",
-			"style": {
-				"navigationStyle": "custom",
-				"navigationBarTitleText": "裁切图片"
-			}
-		},
-		{
-			"path": "pages/path/path",
-			"style": {
-				"navigationBarTitleText": "学习路径",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/video/video",
-			"style": {
-				"navigationBarTitleText": "视频讲解",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/video-library/video-library",
-			"style": {
-				"navigationBarTitleText": "视频讲解",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/auth/auth",
-			"style": {
-				"navigationBarTitleText": "登录 / 注册",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/history/history",
-			"style": {
-				"navigationBarTitleText": "历史会话",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/diagnosis/diagnosis",
-			"style": {
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/wrong/wrong",
-			"style": {
-				"navigationBarTitleText": "错题集",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/graph/graph",
-			"style": {
-				"navigationBarTitleText": "知识图谱",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/trend/trend",
-			"style": {
-				"navigationBarTitleText": "学情趋势",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/profile/edit",
-			"style": {
-				"navigationBarTitleText": "编辑资料",
-				"navigationStyle": "custom"
-			}
-		},
-		{
-			"path": "pages/theme/theme",
-			"style": {
-				"navigationBarTitleText": "主题外观",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/focus",
-			"style": {
-				"navigationBarTitleText": "专注",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/report",
-			"style": {
-				"navigationBarTitleText": "报备",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/checkin",
-			"style": {
-				"navigationBarTitleText": "每日打卡",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/stats",
-			"style": {
-				"navigationBarTitleText": "自律统计",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/settings",
-			"style": {
-				"navigationBarTitleText": "自律设置",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/permissions",
-			"style": {
-				"navigationBarTitleText": "提醒权限",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		},
-		{
-			"path": "pages/selfdiscipline/assistant",
-			"style": {
-				"navigationBarTitleText": "AI 助手",
-				"navigationBarBackgroundColor": "#2b6cb0",
-				"navigationBarTextStyle": "white"
-			}
-		}
-	],
-	"globalStyle": {
-		"navigationBarTextStyle": "white",
-		"navigationBarTitleText": "数学知识问答",
-		"navigationBarBackgroundColor": "#2b6cb0",
-		"backgroundColor": "#f5f6f8"
-	},
-	"easycom": {
-		"autoscan": true,
-		"custom": {
-			"^wd-(.*)": "@wot-ui/ui/components/wd-$1/wd-$1.vue"
-		}
-	},
-	"condition": {
-		"current": 0,
-		"list": [
-			{
-				"name": "",
-				"path": "",
-				"query": ""
-			}
-		]
-	}
+  "pages": [
+    {
+      "path": "pages/welcome/welcome",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "数学知识问答"
+      }
+    },
+    {
+      "path": "pages/crop/crop",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "裁切图片"
+      }
+    },
+    {
+      "path": "pages/path/path",
+      "style": {
+        "navigationBarTitleText": "学习路径",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/video/video",
+      "style": {
+        "navigationBarTitleText": "视频讲解",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/video-library/video-library",
+      "style": {
+        "navigationBarTitleText": "视频讲解",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/auth/auth",
+      "style": {
+        "navigationBarTitleText": "登录 / 注册",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/history/history",
+      "style": {
+        "navigationBarTitleText": "历史会话",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/diagnosis/diagnosis",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/wrong/wrong",
+      "style": {
+        "navigationBarTitleText": "错题集",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/graph/graph",
+      "style": {
+        "navigationBarTitleText": "知识图谱",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/trend/trend",
+      "style": {
+        "navigationBarTitleText": "学情趋势",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/profile/edit",
+      "style": {
+        "navigationBarTitleText": "编辑资料",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/theme/theme",
+      "style": {
+        "navigationBarTitleText": "主题外观",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/focus",
+      "style": {
+        "navigationBarTitleText": "专注",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/report",
+      "style": {
+        "navigationBarTitleText": "报备",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/checkin",
+      "style": {
+        "navigationBarTitleText": "每日打卡",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/stats",
+      "style": {
+        "navigationBarTitleText": "自律统计",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/settings",
+      "style": {
+        "navigationBarTitleText": "自律设置",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/permissions",
+      "style": {
+        "navigationBarTitleText": "提醒权限",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/selfdiscipline/assistant",
+      "style": {
+        "navigationBarTitleText": "AI 助手",
+        "navigationBarBackgroundColor": "#2b6cb0",
+        "navigationBarTextStyle": "white"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "数学知识问答",
+    "navigationBarBackgroundColor": "#2b6cb0",
+    "backgroundColor": "#f5f6f8"
+  },
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^wd-(.*)": "@wot-ui/ui/components/wd-$1/wd-$1.vue"
+    }
+  },
+  "condition": {
+    "current": 0,
+    "list": [
+      {
+        "name": "",
+        "path": "",
+        "query": ""
+      }
+    ]
+  }
 }
