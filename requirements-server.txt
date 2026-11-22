@@ -11,6 +11,8 @@ python-dotenv>=1.0.1
 python-multipart>=0.0.9
 # 语音朗读 /api/tts/stream 的 TTS 合成依赖
 edge-tts>=7.0.0
+# tts_api.py 直接 import aiohttp；不要依赖 edge-tts 的传递依赖
+aiohttp>=3.9
 # 图片实际格式校验与安全解码；OCR 供应商 SDK 不内置
 Pillow>=10.4
 # PDF 文本层读取与受限页面渲染；无需系统 Poppler
