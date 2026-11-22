@@ -91,6 +91,8 @@ secret/
 data/app/
 data/backups/
 data/exports/
+# 采集/调试工具生成的 Chrome profile、HTML 快照，不是业务数据
+data/tooling/
 
 # ---------- 数据迁移 / SQL 导出 ----------
 # 默认不提交任何 SQL 导出；如要提交 schema，请用 ! 放行

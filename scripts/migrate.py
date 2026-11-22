@@ -35,13 +35,13 @@ def _configure_stdout() -> None:
                 pass
 
 
-def _backup_dir() -> Path:
-    return db_module.resolve_db_path().parent / "backups"
+def _backup_dir(db_path: str | None = None) -> Path:
+    return db_module.resolve_db_path(db_path).parent / "backups"
 
 
-def _snapshot(conn) -> Path | None:
+def _snapshot(conn, db_path: str | None = None) -> Path | None:
     """迁移前若数据库文件已存在且有表，则做在线快照；新库/内存库跳过。"""
-    path = db_module.resolve_db_path()
+    path = db_module.resolve_db_path(db_path)
     if str(path) == ":memory:":
         return None
     has_tables = conn.execute(
@@ -50,17 +50,36 @@ def _snapshot(conn) -> Path | None:
     if not has_tables:
         return None
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    dest = _backup_dir() / f"ikgr_before_migration_{ts}.db"
+    dest = _backup_dir(db_path) / f"ikgr_before_migration_{ts}.db"
     return db_module.backup(conn, dest)
 
 
-def run_migrate(db_path: str | None) -> None:
+def _prune_migration_backups(backup_dir: Path, keep: int) -> list[Path]:
+    """只保留最近 keep 份迁移快照，不动数据备份/部署备份。"""
+    if keep <= 0:
+        return []
+    files = sorted(
+        backup_dir.glob("ikgr_before_migration_*.db"),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    removed = []
+    for old in files[keep:]:
+        try:
+            old.unlink()
+            removed.append(old)
+        except OSError:
+            pass
+    return removed
+
+
+def run_migrate(db_path: str | None, keep: int = 10) -> None:
     conn = db_module.connect(db_path)
     try:
         pending = [m for m in sorted(MIGRATIONS, key=lambda x: x.version)
                    if m.version not in applied_versions(conn)]
         if pending:
-            snapshot = _snapshot(conn)
+            snapshot = _snapshot(conn, db_path)
             if snapshot:
                 print(f"已创建迁移前快照: {snapshot}")
             applied = apply_migrations(conn, MIGRATIONS)
@@ -74,6 +93,10 @@ def run_migrate(db_path: str | None) -> None:
         updated = quiz_service.backfill_grade_snapshots(conn)
         if updated:
             print(f"已为 {updated} 个历史诊断会话补齐年级。")
+
+        removed = _prune_migration_backups(_backup_dir(db_path), keep)
+        if removed:
+            print(f"已清理 {len(removed)} 个旧迁移快照（保留最近 {keep} 份）。")
     finally:
         conn.close()
 
@@ -96,12 +119,14 @@ def main() -> None:
                         help="up=应用迁移（默认），status=查看版本状态")
     parser.add_argument("--db", dest="db_path", default=None,
                         help="数据库文件路径（默认 data/app/ikgr.db，可用 IKGR_DB_PATH 覆盖）")
+    parser.add_argument("--keep", type=int, default=10,
+                        help="保留最近几份迁移快照，默认 10；0 表示不清理")
     args = parser.parse_args()
 
     if args.command == "status":
         run_status(args.db_path)
     else:
-        run_migrate(args.db_path)
+        run_migrate(args.db_path, keep=max(0, args.keep))
 
 
 if __name__ == "__main__":

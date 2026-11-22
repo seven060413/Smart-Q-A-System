@@ -45,7 +45,9 @@ from src.video_import import (  # noqa: E402
 )
 
 BOOK_VERSION_ID = "math:book:math_5b_rjb"
-RAW_DIR = ROOT / "data" / "app" / "browser_search"
+# 这是采集工具的 Chrome profile/HTML 快照，不是业务数据；
+# 放在 data/tooling 下，避免混进 data/app 的数据库/附件备份。
+RAW_DIR = ROOT / "data" / "tooling" / "browser_search"
 CHROME_CANDIDATES = [
     Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
     Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
