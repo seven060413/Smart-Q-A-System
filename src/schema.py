@@ -450,6 +450,57 @@ ALTER TABLE users ADD COLUMN grade_updated_at TEXT;
 ALTER TABLE conversations ADD COLUMN grade_at_creation INTEGER;
 """
 
+# version 12：附件内容去重。
+# 说明：
+# - storage_name 不再 UNIQUE：同一份内容可以被多条附件记录引用；
+# - sha256 记录存储内容的哈希，新上传按哈希全局去重；
+# - original_byte_size 记录压缩前大小，便于统计压缩效果；
+# - 旧数据 sha256 为 NULL，由后续回填脚本补齐。
+ATTACHMENT_DEDUPE_SCHEMA = """
+PRAGMA foreign_keys = OFF;
+CREATE TABLE attachments_v12 (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    original_name TEXT NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('image/jpeg', 'image/png', 'application/pdf')),
+    byte_size INTEGER NOT NULL CHECK (byte_size > 0),
+    width INTEGER NOT NULL CHECK (width > 0),
+    height INTEGER NOT NULL CHECK (height > 0),
+    storage_name TEXT NOT NULL,
+    sha256 TEXT,
+    original_byte_size INTEGER,
+    ocr_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (ocr_status IN ('pending', 'processing', 'completed', 'partial', 'failed')),
+    ocr_text TEXT,
+    ocr_confidence REAL,
+    question_text TEXT,
+    solution_json TEXT,
+    solved_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    page_count INTEGER,
+    page_results_json TEXT,
+    failed_pages_json TEXT NOT NULL DEFAULT '[]',
+    error_code TEXT
+);
+INSERT INTO attachments_v12
+SELECT id, user_id, conversation_id, original_name, media_type, byte_size, width, height,
+       storage_name, NULL, NULL, ocr_status, ocr_text, ocr_confidence, question_text,
+       solution_json, solved_at, created_at, updated_at, deleted_at, user_message_id,
+       page_count, page_results_json, failed_pages_json, error_code
+FROM attachments;
+DROP TABLE attachments;
+ALTER TABLE attachments_v12 RENAME TO attachments;
+CREATE INDEX ix_attachments_user ON attachments(user_id, created_at);
+CREATE INDEX ix_attachments_conversation ON attachments(conversation_id, created_at);
+CREATE INDEX ix_attachments_storage ON attachments(storage_name);
+CREATE INDEX ix_attachments_sha ON attachments(sha256, media_type);
+PRAGMA foreign_keys = ON;
+"""
+
 MIGRATIONS: list[Migration] = [
     Migration(version=1, name="initial_schema", sql=INITIAL_SCHEMA),
     Migration(
@@ -527,6 +578,7 @@ MIGRATIONS: list[Migration] = [
     ),
     Migration(version=10, name="learning_loop", sql=LEARNING_LOOP_SCHEMA),
     Migration(version=11, name="student_grade", sql=STUDENT_GRADE_SCHEMA),
+    Migration(version=12, name="attachment_dedupe", sql=ATTACHMENT_DEDUPE_SCHEMA),
 ]
 
 
