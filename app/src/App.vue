@@ -1,6 +1,7 @@
 <script>
 import { checkAuthExpiry, initAuth } from './auth.js'
 import { initThemeBridge } from './theme/theme.js'
+import { cleanupAppTempFiles } from './temp-files.js'
 import { restoreInstalledThemes } from './themes/installed.js'
 import { activateBuiltinPlugins } from './plugins/index.js'
 import { bootstrapSelfDiscipline, onSelfDisciplineForeground } from './selfdiscipline/bootstrap.js'
@@ -12,6 +13,8 @@ export default {
     console.log('App Launch')
     // 必须先于首屏渲染，避免深色模式闪白
     initThemeBridge()
+    // App 私有目录里的裁图/PDF 临时文件不会被系统清缓存清掉，启动时清理。
+    cleanupAppTempFiles()
     // 运行时安装的主题：读取本地注册表并把当前主题重新应用一遍
     restoreInstalledThemes()
     // 注册内置功能插件（静态模块，不使用动态执行）

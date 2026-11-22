@@ -49,18 +49,50 @@ export function getStoredUser() {
   }
 }
 
+// 头像单独存 user_avatar，不再在缓存的 user JSON 里重复存一份 base64。
+function slimUser(user) {
+  if (!user || typeof user !== 'object') return user
+  const copy = { ...user }
+  delete copy.avatar
+  return copy
+}
+
 export function saveStoredAuth({ token, user, expiresAt }) {
   safeSet(TOKEN_KEY, token)
-  safeSet(USER_KEY, JSON.stringify(user || null))
+  safeSet(USER_KEY, JSON.stringify(slimUser(user)))
   safeSet(EXPIRES_KEY, expiresAt || '')
 }
 
 export function updateStoredUser(user) {
-  safeSet(USER_KEY, JSON.stringify(user || null))
+  safeSet(USER_KEY, JSON.stringify(slimUser(user)))
+}
+
+// 与账号绑定的本地资料缓存。退出/换账号时必须清掉，否则会串号。
+export const PROFILE_OWNER_KEY = 'ikgr.profile.owner'
+const PROFILE_CACHE_KEYS = [
+  'user_avatar',
+  'custom_nickname',
+  'user_grade',
+  'last_conversation_id',
+]
+
+export function clearProfileCaches() {
+  for (const key of PROFILE_CACHE_KEYS) safeRemove(key)
+  safeRemove(PROFILE_OWNER_KEY)
+}
+
+/** 登录/恢复会话时认领缓存；发现是另一位用户则先清空。 */
+export function claimProfileCaches(userId) {
+  if (!userId) return
+  const owner = safeGet(PROFILE_OWNER_KEY, '')
+  if (owner && owner !== userId) clearProfileCaches()
+  safeSet(PROFILE_OWNER_KEY, userId)
 }
 
 export function clearStoredAuth() {
   safeRemove(TOKEN_KEY)
   safeRemove(USER_KEY)
   safeRemove(EXPIRES_KEY)
+  // 401、退出、令牌过期都会走到这里；资料缓存一并清掉。
+  clearProfileCaches()
 }

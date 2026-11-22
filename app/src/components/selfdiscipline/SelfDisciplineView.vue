@@ -10,6 +10,22 @@
 
       <PersonaCard :line="persona" :hint="personaHint" :state="eyeState" :progress="eyeProgress" />
 
+      <!-- 权限未齐时给一个直达入口，避免用户只能翻到设置页才找到 -->
+      <view
+        v-if="permissionHint.supported && permissionHint.missing.length"
+        class="sd-card permission-card"
+      >
+        <view class="permission-main">
+          <text class="permission-title">
+            提醒与守护还差 {{ permissionHint.missing.length }} 项权限
+          </text>
+          <text class="permission-sub">
+            {{ permissionHint.missing.join('、') }}未开启，开启后提醒和悬浮窗才能完整工作。
+          </text>
+        </view>
+        <button class="sd-btn permission-btn" @click="go('permissions')">去开启</button>
+      </view>
+
       <view class="stats-row">
         <StatTile label="今日专注" :value="today.focusMinutes" unit="分" tone="primary" />
         <StatTile
@@ -109,6 +125,8 @@ import StatTile from './StatTile.vue'
 import GroupCard from '../ui/GroupCard.vue'
 import * as repo from '../../selfdiscipline/repository.js'
 import * as focus from '../../selfdiscipline/focus.js'
+import * as guard from '../../selfdiscipline/guard.js'
+import * as reminder from '../../selfdiscipline/reminder.js'
 import * as reportModule from '../../selfdiscipline/report.js'
 import * as checkin from '../../selfdiscipline/checkin.js'
 import * as stats from '../../selfdiscipline/stats.js'
@@ -138,6 +156,7 @@ const statusBarHeight = (() => {
 const now = ref(Date.now())
 const loading = ref(true)
 const errorText = ref('')
+const permissionHint = ref({ supported: false, missing: [] })
 const prefs = ref({ strictness: 'A' })
 const state = reactive({
   focus: null,
@@ -292,9 +311,30 @@ async function loadRecent() {
   return rows.slice(0, 3)
 }
 
+async function loadPermissions() {
+  try {
+    const readiness = await reminder.getReadiness()
+    const guardStatus = guard.getGuardStatus() || {}
+    const missing = []
+    if (readiness.supported) {
+      if (!readiness.notifications) missing.push('通知')
+      if (readiness.exactAlarmNeeded && !readiness.exactAlarm) missing.push('精确闹钟')
+    }
+    if (guardStatus.supported && !guardStatus.overlay) missing.push('悬浮窗')
+    permissionHint.value = {
+      supported: !!readiness.supported || !!guardStatus.supported,
+      missing,
+    }
+  } catch (e) {
+    permissionHint.value = { supported: false, missing: [] }
+  }
+}
+
 async function load() {
   loading.value = true
   errorText.value = ''
+  // 权限状态是辅助信息，不阻塞主数据加载。
+  loadPermissions()
   try {
     await repo.init()
     await focus.loadRunningFocus()
@@ -459,6 +499,36 @@ const quickItems = [
   display: flex;
   gap: 16rpx;
   margin-bottom: 24rpx;
+}
+.permission-card {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  border-left: 6rpx solid var(--ik-primary);
+}
+.permission-main {
+  flex: 1;
+  min-width: 0;
+}
+.permission-title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--ik-t1);
+}
+.permission-sub {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--ik-t3);
+}
+.permission-btn {
+  flex: 0 0 auto;
+  width: 150rpx;
+  height: 64rpx;
+  line-height: 64rpx;
+  font-size: 24rpx;
 }
 .sd-card {
   background: var(--ik-card);

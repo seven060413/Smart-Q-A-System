@@ -1,19 +1,25 @@
-// ===== 后端服务地址（只改这里，业务代码无需调整）=====
-// 当前为手机 / 局域网调试地址：手机与电脑在同一 Wi-Fi 时使用
+// ===== 后端服务地址 =====
+// H5 开发默认本地；H5 构建和 App 打包默认生产 HTTPS。
+// 真机局域网调试时用环境变量覆盖（app/.env.local）：
+//   VITE_API_BASE_URL=http://192.168.1.31:18082
+//
+// 注意：
+// - release 包不要用 http://。Android targetSdk >= 28 默认禁止明文 HTTP；
+//   局域网调试只能用于 debug 包，并需要临时允许 cleartext。
+// - 安全边界：前端只访问本后端；语音转写走 POST /api/transcribe，
+//   由后端请求 ASR 服务，前端不保存任何 ASR 密钥。
 
+const DEV_BASE_URL = 'http://127.0.0.1:18082'
+const PROD_BASE_URL = 'https://seventeen17.com.cn'
 
+// #ifdef H5
+const DEFAULT_BASE_URL = import.meta.env.DEV ? DEV_BASE_URL : PROD_BASE_URL
+// #endif
+// #ifndef H5
+// App / 小程序一律使用生产地址；调试用 VITE_API_BASE_URL 覆盖。
+const DEFAULT_BASE_URL = PROD_BASE_URL
+// #endif
 
-export const BASE_URL = 'https://seventeen17.com.cn'
+const injectedBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 
-
-
-
-//测试时改成这个http://127.0.0.1:18080 / http://114.55.116.162:18080 /https://seventeen17.com.cn
-// 实际部署时按环境改成你的地址（不要照抄示例，按真实环境填写）：
-// 1) 手机 / 局域网调试：http://<电脑局域网IPv4>:18080（手机与电脑同一 Wi-Fi）
-// 2) 正式部署：https://<你的后端域名>（H5 麦克风要求 HTTPS 或 localhost）
-// 3) Android APK 会在打包时写死此值，改地址后必须重新打包
-// 安全边界：前端（H5/APK）只访问本后端；语音转写调用 POST /api/transcribe，
-// 由后端再请求语音识别服务。前端不直接请求 Qwen/百炼，也不保存任何 ASR 密钥。
-//http://127.0.0.1:18080
-//http://192.168.1.31:18080
+export const BASE_URL = (injectedBaseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '')

@@ -7,6 +7,30 @@
           网页版仅支持页面内提醒，不支持后台通知、精确闹钟与悬浮窗。完整能力请使用安卓 App。
         </view>
 
+        <!-- 按缺失项逐项引导；从系统设置返回后 onShow 会自动刷新 -->
+        <view v-if="readiness.supported" class="perm-card perm-summary">
+          <view class="perm-row">
+            <view class="perm-main">
+              <text class="perm-label">
+                {{ missingItems.length ? `还差 ${missingItems.length} 项权限` : '权限已就绪' }}
+              </text>
+              <text class="perm-sub">
+                {{ missingItems.length ? missingLabels : '通知、闹钟和悬浮窗都已开启' }}
+              </text>
+            </view>
+            <text class="perm-state" :class="missingItems.length ? 'bad' : 'ok'">
+              {{ missingItems.length ? '待开启' : '完成' }}
+            </text>
+          </view>
+          <button
+            v-if="missingItems.length"
+            class="primary-btn"
+            :disabled="busy"
+            @click="openNext"
+          >去开启下一项 · {{ nextMissing && nextMissing.label }}</button>
+          <text v-else class="perm-note">回到自律页开始专注即可。</text>
+        </view>
+
         <view class="perm-card">
           <view class="perm-row">
             <view class="perm-main">
@@ -141,9 +165,40 @@ const exactTextClass = computed(() => {
   return readiness.value.exactAlarm ? 'ok' : 'bad'
 })
 
+const missingItems = computed(() => {
+  const r = readiness.value || {}
+  if (!r.supported) return []
+  const items = []
+  if (!r.notifications) items.push({ key: 'notifications', label: '通知权限' })
+  if (r.exactAlarmNeeded && !r.exactAlarm) {
+    items.push({ key: 'exact', label: '精确闹钟' })
+  }
+  if (guardReady.value && !guardStatus.value.overlay) {
+    items.push({ key: 'overlay', label: '悬浮窗' })
+  }
+  return items
+})
+
+const missingLabels = computed(() =>
+  missingItems.value.map((item) => item.label).join('、')
+)
+const nextMissing = computed(() => missingItems.value[0] || null)
+
+function openNext() {
+  const item = nextMissing.value
+  if (!item) return
+  if (item.key === 'notifications') requestNotify()
+  else if (item.key === 'exact') openExactSettings()
+  else if (item.key === 'overlay') openOverlay()
+}
+
 async function refresh() {
   applyNativeNavigationBar()
-  readiness.value = await reminder.getReadiness()
+  try {
+    readiness.value = await reminder.getReadiness()
+  } catch (e) {
+    readiness.value = {}
+  }
   guardStatus.value = guard.getGuardStatus() || {}
 }
 
@@ -206,6 +261,9 @@ function openOverlay() {
   padding: 26rpx 28rpx;
   margin-bottom: 20rpx;
   box-sizing: border-box;
+}
+.perm-summary {
+  border: 1rpx solid var(--ik-primary-weak);
 }
 .perm-row {
   display: flex;

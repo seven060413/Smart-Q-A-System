@@ -85,6 +85,7 @@ import { computed, getCurrentInstance, nextTick, ref } from 'vue'
 import { onLoad, onReady, onUnload } from '@dcloudio/uni-app'
 import { cropSession, resetCropSession } from '../../crop-session.js'
 import { cropBridge } from '../../crop-bridge.js'
+import { cropTempName } from '../../temp-files.js'
 import { quadArea } from '../../perspective.js'
 
 const instance = getCurrentInstance()
@@ -324,8 +325,8 @@ function writeBase64WithPlus(base64, fileName) {
 }
 
 async function saveCroppedImage(dataUrl) {
-  const baseName = (name.value || '题目图片').replace(/\.[^.]+$/, '')
-  const fileName = `${baseName}-crop.jpg`
+  // 统一使用 ikgr_crop_ 前缀，App 启动时会清理这批临时文件。
+  const fileName = cropTempName()
 
   // #ifdef H5
   const blob = await (await fetch(dataUrl)).blob()
@@ -340,7 +341,7 @@ async function saveCroppedImage(dataUrl) {
 
   // #ifdef APP-PLUS
   const base64 = String(dataUrl).split(',')[1] || ''
-  const filePath = `_doc/crop-${Date.now()}.jpg`
+  const filePath = `_doc/${fileName}`
   try {
     const fs = uni.getFileSystemManager()
     if (fs && typeof fs.writeFile === 'function') {

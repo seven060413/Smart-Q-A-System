@@ -8,6 +8,7 @@ import {
   registerUser,
 } from './api.js'
 import {
+  claimProfileCaches,
   clearStoredAuth,
   getStoredExpiresAt,
   getStoredToken,
@@ -21,6 +22,8 @@ export function saveAuth(data) {
   const token = data.token || ''
   const user = data.user || null
   const expiresAt = data.expires_at || ''
+  // 换了账号就先清掉上一位用户的头像/昵称/年级/会话缓存。
+  claimProfileCaches(user && user.id)
   saveStoredAuth({ token, user, expiresAt })
   setAuthState(token, user, expiresAt)
 }
@@ -82,6 +85,12 @@ export async function initAuth() {
   }
 
   const cachedUser = getStoredUser()
+  // 老版本缓存没有 owner 标记：认领给当前缓存用户，保留其资料缓存。
+  if (cachedUser && cachedUser.id) {
+    claimProfileCaches(cachedUser.id)
+    // 旧版缓存里可能还带着 base64 avatar，重写一次去掉重复副本。
+    updateStoredUser(cachedUser)
+  }
   store.auth.token = token
   store.auth.expiresAt = expiresAt
   store.auth.user = cachedUser

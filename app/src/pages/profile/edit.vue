@@ -132,6 +132,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { store } from '../../store.js'
 import { updateProfile } from '../../api.js'
+import { prepareAvatar } from '../../avatar.js'
 import { themeVars } from '../../theme/theme.js'
 
 // 年级选项：与后端 users.grade 的 1-9 一一对应。
@@ -216,37 +217,28 @@ function goBack() {
   uni.navigateBack()
 }
 
-// 修改头像逻辑
+// 修改头像：先压缩到 320px 以内，再只保留一份本地缓存。
 function changeAvatar() {
   uni.chooseImage({
     count: 1,
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
-    success: (res) => {
-      const tempFilePath = res.tempFilePaths[0]
-      // #ifdef H5
-      const reader = new FileReader()
-      reader.onload = async (e) => {
-        const base64 = e.target.result
+    success: async (res) => {
+      try {
+        uni.showLoading({ title: '处理中…', mask: true })
+        const base64 = await prepareAvatar(
+          res.tempFilePaths[0],
+          res.tempFiles && res.tempFiles[0]
+        )
         customAvatar.value = base64
         uni.setStorageSync('user_avatar', base64)
         await saveAvatarToServer(base64)
+      } catch (e) {
+        uni.showToast({ title: e.message || '头像处理失败', icon: 'none' })
+      } finally {
+        uni.hideLoading()
       }
-      reader.readAsDataURL(res.tempFiles[0])
-      // #endif
-      // #ifndef H5
-      uni.getFileSystemManager().readFile({
-        filePath: tempFilePath,
-        encoding: 'base64',
-        success: async (data) => {
-          const base64Str = 'data:image/jpeg;base64,' + data.data
-          customAvatar.value = base64Str
-          uni.setStorageSync('user_avatar', base64Str)
-          await saveAvatarToServer(base64Str)
-        }
-      })
-      // #endif
-    }
+    },
   })
 }
 

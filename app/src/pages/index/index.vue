@@ -611,6 +611,7 @@ import Sidebar from './Sidebar.vue'
 import { splitLinesOutsideMath, textToSpeech } from '../../math/latex.js'
 import { splitQuestionText } from '../../question-split.js'
 import { cropSession, resetCropSession } from '../../crop-session.js'
+import { pdfTempName, removeTempFile } from '../../temp-files.js'
 import { TAB_ITEMS, tabIndexByPath, tabPathByIndex } from '../../tabbar.js'
 import { isDark, themeVars } from '../../theme/theme.js'
 import { store } from '../../store.js'
@@ -1834,6 +1835,8 @@ function uploadRecording(filePath, session, options = {}) {
       uni.showToast({ title: (e && e.message) || '语音识别失败，请重试', icon: 'none' })
     })
     .finally(() => {
+      // App：识别完成（成功或失败）后删除录音临时文件。
+      removeTempFile(filePath)
       if (session === recordSession) resetRecordState()
     })
 }
@@ -1856,14 +1859,18 @@ if (recorder) {
     const recordedSeconds = recordSeconds.value
     stopRecordTimer()
 
-    if (session !== recordSession) return
+    const filePath = res && res.tempFilePath
+    if (session !== recordSession) {
+      removeTempFile(filePath)
+      return
+    }
 
     if (pendingCancel) {
+      removeTempFile(filePath)
       resetRecordState()
       return
     }
 
-    const filePath = res && res.tempFilePath
     if (!filePath) {
       resetRecordState()
       uni.showToast({ title: '录音失败，请重试', icon: 'none' })
@@ -1872,6 +1879,7 @@ if (recorder) {
 
     const durationMs = (res && res.duration) || recordedSeconds * 1000
     if (durationMs < 500) {
+      removeTempFile(filePath)
       resetRecordState()
       uni.showToast({ title: '按住说话，松开发送', icon: 'none' })
       return
@@ -2316,7 +2324,7 @@ async function openAttachmentFile(attachmentId, url, name, mediaType, pdfWindow 
     success: (res) => res.statusCode >= 200 && res.statusCode < 300 ? resolve(res.data) : reject(new Error('PDF 下载失败')),
     fail: () => reject(new Error('PDF 下载失败')),
   }))
-  const filename = `${Date.now()}-${String(name || 'document.pdf').replace(/[^\\w.-]/g, '_')}`
+  const filename = pdfTempName(name)
   const entry = await new Promise((resolve, reject) => plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (fs) => fs.root.getFile(filename, { create: true }, resolve, reject), reject))
   await new Promise((resolve, reject) => entry.createWriter((writer) => {
     writer.onwrite = resolve

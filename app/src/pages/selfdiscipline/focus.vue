@@ -128,6 +128,7 @@ import EyeGaze from '../../components/selfdiscipline/EyeGaze.vue'
 import { isDark, themeVars, tokens, applyNativeNavigationBar } from '../../theme/theme.js'
 import * as repo from '../../selfdiscipline/repository.js'
 import * as focus from '../../selfdiscipline/focus.js'
+import * as guard from '../../selfdiscipline/guard.js'
 import { personaLine } from '../../selfdiscipline/persona.js'
 import { formatClock } from '../../selfdiscipline/dates.js'
 
@@ -150,6 +151,8 @@ const circleSize = ref(220)
 let timer = null
 let minutesTouched = false
 let abandonTimer = null
+// 每次进入专注页最多引导一次，避免用户明确选择“暂不开启”后反复弹窗。
+let guardPrompted = false
 
 const runtime = computed(() => focus.focusRuntime(session.value, now.value))
 const remainingClock = computed(() => formatClock(runtime.value.remainingMs))
@@ -241,6 +244,38 @@ function useCustom() {
   minutesTouched = true
 }
 
+/**
+ * 专注守护需要悬浮窗权限。开工前引导一次：
+ * - 去开启：跳到权限页，回来后重新点开始；
+ * - 暂不开启：本次页面不再提示，专注照常开始（只是不显示悬浮窗）。
+ */
+async function ensureGuardPermission() {
+  const prefsValue = prefs.value || {}
+  const guardEnabled = prefsValue.guardEnabled !== false
+  const status = guard.getGuardStatus() || {}
+  if (!guardEnabled || !status.supported || status.overlay) return true
+  if (guardPrompted) return true
+
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '开启专注守护',
+      content: '开启悬浮窗权限后，离开 App 时会显示眼睛提醒。也可以顺便开启通知，避免提醒被系统隐藏。',
+      confirmText: '去开启',
+      cancelText: '暂不开启',
+      success: (res) => {
+        guardPrompted = true
+        if (res.confirm) {
+          uni.navigateTo({ url: '/pages/selfdiscipline/permissions' })
+          resolve(false)
+        } else {
+          resolve(true)
+        }
+      },
+      fail: () => resolve(true),
+    })
+  })
+}
+
 async function start() {
   if (busy.value) return
   const text = task.value.trim()
@@ -248,6 +283,8 @@ async function start() {
     uni.showToast({ title: '先写下这 25 分钟要做什么', icon: 'none' })
     return
   }
+  const allowed = await ensureGuardPermission()
+  if (!allowed) return
   busy.value = true
   try {
     const created = await focus.startFocus({ task: text, minutes: minutes.value })
