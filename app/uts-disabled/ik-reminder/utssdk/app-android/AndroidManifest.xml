@@ -4,17 +4,19 @@
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.VIBRATE" />
 
-  <!-- 到点接收器：使用显式 PendingIntent，不需要 intent-filter -->
-  <receiver
-    android:name="uts.sdk.modules.ikReminder.ReminderReceiver"
-    android:exported="false" />
+  <application>
+    <!-- 到点接收器：使用显式 PendingIntent，不需要 intent-filter -->
+    <receiver
+      android:name="uts.sdk.modules.ikReminder.ReminderReceiver"
+      android:exported="false" />
 
-  <!-- 开机重排 -->
-  <receiver
-    android:name="uts.sdk.modules.ikReminder.BootReceiver"
-    android:exported="true">
-    <intent-filter>
-      <action android:name="android.intent.action.BOOT_COMPLETED" />
-    </intent-filter>
-  </receiver>
+    <!-- 开机重排 -->
+    <receiver
+      android:name="uts.sdk.modules.ikReminder.BootReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+      </intent-filter>
+    </receiver>
+  </application>
 </manifest>

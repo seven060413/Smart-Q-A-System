@@ -1,6 +1,8 @@
 // App 私有目录（_doc）临时文件管理：裁图结果、PDF 预览副本。
 // _doc 不会被系统“清除缓存”清掉，必须在 App 启动时主动清理。
 
+import { removeLocalFile } from './file-utils.js'
+
 const CROP_PREFIX = 'ikgr_crop_'
 const PDF_PREFIX = 'ikgr_pdf_'
 // 兼容旧版本遗留的命名：crop-<时间戳>.jpg / <13位时间戳>-xxx.pdf
@@ -21,9 +23,7 @@ export function pdfTempName(name) {
 export function removeTempFile(filePath) {
   // #ifdef APP-PLUS
   if (!filePath) return
-  try {
-    uni.getFileSystemManager().unlink({ filePath, fail: () => {} })
-  } catch (e) {}
+  removeLocalFile(filePath)
   // #endif
 }
 

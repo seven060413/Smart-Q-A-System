@@ -1,6 +1,8 @@
 import { reactive } from 'vue'
 import { applyThemeManifest, clearPluginTheme, themeState } from '../theme/theme.js'
 import { BUILTIN_THEMES } from './index.js'
+import wildExampleManifest from './examples/theme_wild.plugin.json'
+import sunsetExampleManifest from './examples/theme_sunset.theme.json'
 
 /**
  * 运行时主题插件安装器
@@ -530,8 +532,29 @@ async function plusDirStats(dir, depth = 0) {
 }
 
 function plusDecompress(zipPath, targetDir) {
+  // plus.zip 在路径异常时可能既不回调成功也不回调失败，加超时避免界面永远停在“安装中”。
+  return withTimeout(
+    new Promise((resolve, reject) => {
+      plus.zip.decompress(zipPath, targetDir, resolve, reject)
+    }),
+    20000,
+    '解压主题包超时，请确认 zip 文件有效'
+  )
+}
+
+function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
-    plus.zip.decompress(zipPath, targetDir, resolve, reject)
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
   })
 }
 
@@ -619,6 +642,8 @@ async function installFromZipPath(zipPath) {
   const tmpDir = `${APP_ROOT}/tmp_${stamp}`
   await plusEnsureDir(APP_ROOT)
   try {
+    // plus.zip 不会自动创建目标目录，目标不存在时会一直不回调。
+    await plusEnsureDir(tmpDir)
     await plusDecompress(zipPath, tmpDir)
     await plusDirStats(tmpDir)
   } catch (e) {
@@ -626,6 +651,11 @@ async function installFromZipPath(zipPath) {
     fail(e && e.message ? e.message : '解压失败，请确认 zip 文件有效')
   }
 
+  return installFromDirectory(tmpDir)
+}
+
+/** 解压/复制完成后的安装流程：解析清单、校验、移动到正式目录并应用。 */
+async function installFromDirectory(tmpDir) {
   const tmpBase = await findAppBase(tmpDir)
   const manifestText = (await plusReadTextOrNull(`${tmpBase}/plugin.json`))
     || (await plusReadTextOrNull(`${tmpBase}/theme.json`))
@@ -687,16 +717,56 @@ export const EXAMPLE_PLUGINS = [
     file: 'theme_wild.zip',
     name: '原野（BiliLite 格式）',
     description: 'plugin.json 平铺 token + #AARRGGBB，安装时自动转换',
+    manifest: wildExampleManifest,
+    assetDir: '/static/plugin-examples/theme_wild/assets',
   },
   {
     file: 'theme_sunset.zip',
     name: '日落（IKGR 格式）',
     description: 'theme.json + colors/darkColors + 手机/平板双背景图',
+    manifest: sunsetExampleManifest,
+    assetDir: '/static/plugin-examples/theme_sunset/assets',
   },
 ]
 
 // #ifdef APP-PLUS
+/** 优先安装随包解包的目录（不依赖 plus.zip）。 */
+async function copyBundledDirApp(appPath) {
+  const dirPath = appPath.replace(/\.zip$/i, '')
+  const srcPath = `_www${dirPath}`
+  let exists = false
+  try {
+    exists = await withTimeout(plusExists(srcPath), 5000, '检查内置主题超时')
+  } catch (e) {
+    exists = false
+  }
+  if (!exists) return null
+
+  const stamp = Date.now()
+  const dirName = `_bundled_${stamp}`
+  const tmpDir = `${APP_ROOT}/${dirName}`
+  await plusEnsureDir(APP_ROOT)
+  const srcEntry = await plusResolve(srcPath)
+  const rootEntry = await plusResolve(APP_ROOT)
+  await withTimeout(
+    new Promise((resolve, reject) => {
+      srcEntry.copyTo(rootEntry, dirName, resolve, reject)
+    }),
+    20000,
+    '复制内置主题超时'
+  )
+  return await installFromDirectory(tmpDir)
+}
+
 async function installBundledZipApp(appPath) {
+  // 示例主题已随包解压到同名目录；目录复制比 plus.zip 稳定。
+  try {
+    const installed = await copyBundledDirApp(appPath)
+    if (installed) return installed
+  } catch (e) {
+    // 目录复制失败时退回 zip 解压流程
+  }
+
   const srcPath = `_www${appPath}`
   const stamp = Date.now()
   const copyName = `_bundled_${stamp}.zip`
@@ -706,9 +776,13 @@ async function installBundledZipApp(appPath) {
   try {
     const srcEntry = await plusResolve(srcPath)
     const rootEntry = await plusResolve(APP_ROOT)
-    await new Promise((resolve, reject) => {
-      srcEntry.copyTo(rootEntry, copyName, resolve, reject)
-    })
+    await withTimeout(
+      new Promise((resolve, reject) => {
+        srcEntry.copyTo(rootEntry, copyName, resolve, reject)
+      }),
+      8000,
+      '复制内置主题包超时'
+    )
     copiedPath = `${APP_ROOT}/${copyName}`
   } catch (e) {
     // 部分基座不允许访问 _www，退化为直接解压应用资源路径
@@ -727,9 +801,39 @@ async function installBundledZipApp(appPath) {
 }
 // #endif
 
+/**
+ * 随包示例主题：清单在构建时打进 JS，背景图直接用包内 /static 路径，
+ * 不经过 plus.zip / 文件复制，App 和 H5 都不会卡在原生回调上。
+ */
+async function installBundledManifestApp(example) {
+  const manifest = example.manifest
+  const id = validateManifest(manifest)
+  const rawTheme = pickThemeObject(manifest)
+  const assetDir = String(example.assetDir || '').replace(/\/+$/, '')
+  const theme = await normalizeTheme(rawTheme, (value) => {
+    const name = basename(String(value).replace(/^\.\//, ''))
+    const ext = name.split('.').pop().toLowerCase()
+    assert(IMAGE_EXT.includes(ext), `不支持的图片格式：${name}`)
+    return `${assetDir}/${name}`
+  })
+  assert(
+    theme.colors || theme.darkColors || Object.keys(theme).some((k) => BG_KEYS.includes(k)),
+    '主题内容为空'
+  )
+
+  if (installedThemes.some((t) => t.id === id)) await uninstallTheme(id)
+  const record = buildRecord(manifest, id, theme, assetDir)
+  await saveRecord(record)
+  applyRecord(record)
+  return record
+}
+
 /** 安装随包内置的示例插件（H5 / App 都可用，手机无需选文件） */
 export async function installExamplePlugin(example) {
   assert(example && example.file, '示例插件无效')
+  if (example.manifest) {
+    return installBundledManifestApp(example)
+  }
   const appPath = `/static/plugin-examples/${example.file}`
   // #ifdef H5
   const resp = await fetch(appPath)

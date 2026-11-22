@@ -437,19 +437,7 @@
           @mouseup.stop.prevent="onVoiceEnd"
           @mouseleave="onVoiceMouseLeave"
         >
-          <svg class="voice-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <g
-              transform="rotate(90 12 12)"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            >
-              <path d="M2 8.82a15 15 0 0 1 20 0" />
-              <path d="M5 12.859a10 10 0 0 1 14 0" />
-              <path d="M8.5 16.429a5 5 0 0 1 7 0" />
-            </g>
-          </svg>
+          <VoiceWaveIcon />
           <text class="sr-only">语音输入</text>
         </button>
         <button
@@ -458,15 +446,7 @@
           aria-label="添加题目"
           @click="toggleAttachmentMenu"
         >
-          <svg class="plus-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              d="M12 5v14M5 12h14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
+          <wd-icon name="plus" custom-class="plus-icon" />
         </button>
         <button
           class="send-btn"
@@ -607,11 +587,13 @@ import AppTabBar from '../../components/AppTabBar.vue'
 import MyView from '../../components/my/MyView.vue'
 import SelfDisciplineView from '../../components/selfdiscipline/SelfDisciplineView.vue'
 import MathText from '../../components/ui/MathText.vue'
+import VoiceWaveIcon from '../../components/ui/VoiceWaveIcon.vue'
 import Sidebar from './Sidebar.vue'
 import { splitLinesOutsideMath, textToSpeech } from '../../math/latex.js'
 import { splitQuestionText } from '../../question-split.js'
 import { cropSession, resetCropSession } from '../../crop-session.js'
 import { pdfTempName, removeTempFile } from '../../temp-files.js'
+import { choosePdfNative } from '../../native-pdf-picker.js'
 import { TAB_ITEMS, tabIndexByPath, tabPathByIndex } from '../../tabbar.js'
 import { isDark, themeVars } from '../../theme/theme.js'
 import { store } from '../../store.js'
@@ -2364,6 +2346,16 @@ function choosePdf() {
     return
   }
   // #endif
+  // #ifdef APP-PLUS
+  choosePdfNative()
+    .then((picked) => {
+      if (picked) setPdfDraft(picked.filePath, null, picked.name, picked.size)
+    })
+    .catch((e) => {
+      uni.showToast({ title: (e && e.message) || '未选择 PDF 文件', icon: 'none' })
+    })
+  return
+  // #endif
   if (typeof uni.chooseFile === 'function') {
     uni.chooseFile({ count: 1, type: 'file', extension: ['pdf'], success: (res) => {
       const file = res.tempFiles && res.tempFiles[0]
@@ -3735,9 +3727,8 @@ function goPath(msg) {
   opacity: 0.45;
 }
 .plus-icon {
-  width: 40rpx;
-  height: 40rpx;
-  display: block;
+  font-size: 40rpx;
+  line-height: 1;
 }
 
 /* ==================== 附件选择弹层 ==================== */
@@ -4064,9 +4055,8 @@ function goPath(msg) {
 }
 
 .voice-icon {
-  width: 40rpx;
-  height: 40rpx;
-  display: block;
+  font-size: 40rpx;
+  line-height: 1;
 }
 .sr-only {
   position: absolute;

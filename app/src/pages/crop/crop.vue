@@ -87,6 +87,7 @@ import { cropSession, resetCropSession } from '../../crop-session.js'
 import { cropBridge } from '../../crop-bridge.js'
 import { cropTempName } from '../../temp-files.js'
 import { quadArea } from '../../perspective.js'
+import { readFileAsDataUrl } from '../../file-utils.js'
 
 const instance = getCurrentInstance()
 const src = ref('')
@@ -287,13 +288,7 @@ function readImageAsDataUrl() {
     // #endif
 
     // #ifdef APP-PLUS
-    const mime = /\.png$/i.test(name.value || src.value) ? 'image/png' : 'image/jpeg'
-    uni.getFileSystemManager().readFile({
-      filePath: src.value,
-      encoding: 'base64',
-      success: (res) => resolve(`data:${mime};base64,${res.data}`),
-      fail: (err) => reject(new Error((err && err.errMsg) || '读取图片失败')),
-    })
+    readFileAsDataUrl(src.value).then(resolve).catch(reject)
     // #endif
 
     // #ifndef H5
@@ -343,7 +338,10 @@ async function saveCroppedImage(dataUrl) {
   const base64 = String(dataUrl).split(',')[1] || ''
   const filePath = `_doc/${fileName}`
   try {
-    const fs = uni.getFileSystemManager()
+    const fs =
+      typeof uni.getFileSystemManager === 'function'
+        ? uni.getFileSystemManager()
+        : null
     if (fs && typeof fs.writeFile === 'function') {
       await new Promise((resolve, reject) => {
         fs.writeFile({

@@ -57,13 +57,22 @@ function slimUser(user) {
   return copy
 }
 
+// 退出登录会清掉 user_avatar；重新登录/恢复会话时把服务端头像写回本地缓存，
+// 否则只读 user_avatar 的页面（如侧边栏）会显示成默认头像。
+function syncAvatarCache(user) {
+  const avatar = user && typeof user.avatar === 'string' ? user.avatar : ''
+  if (avatar) safeSet('user_avatar', avatar)
+}
+
 export function saveStoredAuth({ token, user, expiresAt }) {
+  syncAvatarCache(user)
   safeSet(TOKEN_KEY, token)
   safeSet(USER_KEY, JSON.stringify(slimUser(user)))
   safeSet(EXPIRES_KEY, expiresAt || '')
 }
 
 export function updateStoredUser(user) {
+  syncAvatarCache(user)
   safeSet(USER_KEY, JSON.stringify(slimUser(user)))
 }
 

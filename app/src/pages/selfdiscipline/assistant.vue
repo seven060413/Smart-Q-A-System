@@ -90,19 +90,7 @@
           @mouseup.stop.prevent="onVoiceEnd"
           @mouseleave="onVoiceMouseLeave"
         >
-          <svg class="voice-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <g
-              transform="rotate(90 12 12)"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            >
-              <path d="M2 8.82a15 15 0 0 1 20 0" />
-              <path d="M5 12.859a10 10 0 0 1 14 0" />
-              <path d="M8.5 16.429a5 5 0 0 1 7 0" />
-            </g>
-          </svg>
+          <VoiceWaveIcon />
         </button>
         <button
           class="send-btn"
@@ -118,6 +106,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import EyeGaze from '../../components/selfdiscipline/EyeGaze.vue'
+import VoiceWaveIcon from '../../components/ui/VoiceWaveIcon.vue'
 import AiItemDraftList from '../../components/selfdiscipline/AiItemDraftList.vue'
 import { isDark, themeVars, applyNativeNavigationBar } from '../../theme/theme.js'
 import { store } from '../../store.js'
@@ -719,9 +708,8 @@ function onVoiceMouseLeave() {
   opacity: 1;
 }
 .voice-icon {
-  width: 40rpx;
-  height: 40rpx;
-  display: block;
+  font-size: 40rpx;
+  line-height: 1;
 }
 .send-btn {
   padding: 0 24rpx;

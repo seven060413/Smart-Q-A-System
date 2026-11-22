@@ -1,6 +1,8 @@
 // 头像压缩与读取：统一输出 data:image/...;base64,...。
 // 目标是把头像控制在 300KB 以内，避免「user_avatar + 缓存 user JSON」双份大字符串。
 
+import { readFileAsDataUrl } from './file-utils.js'
+
 const MAX_AVATAR_CHARS = 400_000
 const MAX_EDGE = 320
 const QUALITY = 0.82
@@ -56,13 +58,8 @@ async function compressH5(src, file) {
 
 // #ifdef APP-PLUS
 function readAppFile(filePath) {
-  return new Promise((resolve, reject) => {
-    uni.getFileSystemManager().readFile({
-      filePath,
-      encoding: 'base64',
-      success: (res) => resolve(dataUrlFromBase64(res.data)),
-      fail: () => reject(new Error('头像读取失败')),
-    })
+  return readFileAsDataUrl(filePath).catch(() => {
+    throw new Error('头像读取失败')
   })
 }
 

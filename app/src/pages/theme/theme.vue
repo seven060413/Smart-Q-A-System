@@ -223,7 +223,13 @@ async function runInstall(task, okText) {
   installing.value = true
   uni.showLoading({ title: '安装中…', mask: true })
   try {
-    const record = await task()
+    // 原生 zip/文件 API 在异常路径上可能不回调，总超时避免界面永远停在“安装中”。
+    const record = await Promise.race([
+      task(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('安装超时，请重试或检查文件权限')), 45000)
+      }),
+    ])
     uni.hideLoading()
     uni.showToast({ title: okText || `已应用「${record && record.name ? record.name : '主题'}」`, icon: 'none' })
     return true

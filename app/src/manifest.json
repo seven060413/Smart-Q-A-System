@@ -1,9 +1,9 @@
 {
     "name" : "络思",
-    "appid" : "__UNI__91D2DC9",
+    "appid" : "__UNI__AD3B102",
     "description" : "中小学生知识图谱问答",
-    "versionName" : "1.1.0",
-    "versionCode" : 110,
+    "versionName" : "1.1.6",
+    "versionCode" : 116,
     "transformPx" : false,
     "app-plus" : {
         "usingComponents" : true,
@@ -15,7 +15,11 @@
             "autoclose" : true,
             "delay" : 0
         },
-        "modules" : {},
+        "modules" : {
+            "Camera" : {},
+            "Record" : {},
+            "SQLite" : {}
+        },
         "distribute" : {
             "icons" : {
                 "android" : {
@@ -56,7 +60,8 @@
                     "hdpi" : "src/static/images/splash/splash_480x762.png",
                     "xxhdpi" : "src/static/images/splash/splash_1080x1882.png",
                     "xhdpi" : "src/static/images/splash/splash_720x1242.png"
-                }
+                },
+                "useOriginalMsgbox" : true
             }
         }
     },

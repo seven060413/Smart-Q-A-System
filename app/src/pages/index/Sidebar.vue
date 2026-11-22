@@ -85,6 +85,8 @@
 // 👇 新增引入了 watch
 import { computed, ref, onMounted, watch } from 'vue'
 import { store } from '../../store.js'
+import { prepareAvatar } from '../../avatar.js'
+import { updateProfile } from '../../api.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -249,31 +251,28 @@ function pickAvatar(sourceType) {
     count: 1,
     sizeType: ['compressed'],
     sourceType: [sourceType],
-    success: (res) => {
-      const tempFilePath = res.tempFilePaths[0]
-      
-      // #ifdef H5
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        customAvatar.value = e.target.result
-        uni.setStorageSync('user_avatar', e.target.result)
-        uni.showToast({ title: '头像修改成功', icon: 'success' })
-      }
-      reader.readAsDataURL(res.tempFiles[0])
-      // #endif
-      
-      // #ifndef H5
-      uni.getFileSystemManager().readFile({
-        filePath: tempFilePath,
-        encoding: 'base64',
-        success: (data) => {
-          const base64Str = 'data:image/jpeg;base64,' + data.data
-          customAvatar.value = base64Str
-          uni.setStorageSync('user_avatar', base64Str)
-          uni.showToast({ title: '头像修改成功', icon: 'success' })
+    success: async (res) => {
+      try {
+        const avatar = await prepareAvatar(
+          res.tempFilePaths[0],
+          res.tempFiles && res.tempFiles[0]
+        )
+        customAvatar.value = avatar
+        uni.setStorageSync('user_avatar', avatar)
+        // 侧边栏换头像也要存到后端，否则退出登录后本地缓存被清，头像就丢了。
+        if (store.auth.token) {
+          try {
+            const user = await updateProfile({ avatar })
+            if (store.auth.user) store.auth.user.avatar = user.avatar
+          } catch (e) {
+            uni.showToast({ title: '头像已保存到本地，同步失败', icon: 'none' })
+            return
+          }
         }
-      })
-      // #endif
+        uni.showToast({ title: '头像修改成功', icon: 'success' })
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '头像处理失败', icon: 'none' })
+      }
     }
   })
 }

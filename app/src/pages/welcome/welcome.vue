@@ -14,8 +14,9 @@ import { onLoad } from '@dcloudio/uni-app'
 
 onLoad(() => {
   setTimeout(() => {
-    uni.redirectTo({
-      url: '/pages/auth/auth'
+    // 登录与否都先进首页「学习」；未登录用户从「我的」再登录。
+    uni.reLaunch({
+      url: '/pages/index/index?tab=0'
     })
   }, 2000)
 })

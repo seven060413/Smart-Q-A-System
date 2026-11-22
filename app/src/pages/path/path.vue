@@ -29,22 +29,18 @@
     <scroll-view class="map-canvas" scroll-x scroll-y :scroll-top="scrollTop" :scroll-left="scrollLeft">
       <view class="canvas-inner" :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }">
         
-        <!-- SVG 连线层 -->
-        <svg class="links-layer" :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`">
-          <defs>
-            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L8,3 z" fill="#b8a37c"/>
-            </marker>
-            <marker id="arrow-active" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L8,3 z" fill="#c97b4a"/>
-            </marker>
-          </defs>
-          <path v-for="(link, idx) in visibleLinks" :key="'link-'+idx"
-            :d="link.d" 
-            class="link-path" 
-            :class="{ 'link-active': link.active, 'link-done': link.done }"
-            :marker-end="link.direct ? '#arrow' : undefined"/>
-        </svg>
+        <!-- 连线层（view + rotate，App 端不渲染内联 SVG） -->
+        <view class="links-layer">
+          <view
+            v-for="(link, idx) in visibleLinks"
+            :key="'link-'+idx"
+            class="link-line"
+            :class="{ 'link-done': link.done, 'link-active': link.active }"
+            :style="link.style"
+          >
+            <view v-if="link.direct" class="link-arrow"></view>
+          </view>
+        </view>
 
         <!-- 节点层 -->
         <view 
@@ -543,7 +539,7 @@ const visibleLinks = computed(() => {
     if (target) {
       links.push({
         from: pre, to: target,
-        d: makeCurvePath(pre, target),
+        style: makeLinkGeometry(pre, target),
         done: isExplored(pre) && isExplored(target),
         active: (activeNode.value && (activeNode.value.id === pre.id || activeNode.value.id === target.id)),
         direct: pres.length === 1
@@ -556,7 +552,7 @@ const visibleLinks = computed(() => {
     nexts.forEach(nxt => {
       links.push({
         from: target, to: nxt,
-        d: makeCurvePath(target, nxt),
+        style: makeLinkGeometry(target, nxt),
         done: isExplored(target) && isExplored(nxt),
         active: (activeNode.value && (activeNode.value.id === target.id || activeNode.value.id === nxt.id)),
         direct: nexts.length === 1
@@ -567,20 +563,31 @@ const visibleLinks = computed(() => {
   return links
 })
 
-// 生成曲线路径
-function makeCurvePath(from, to) {
+// 连线几何：生成一条从节点边缘到节点边缘的线段样式
+function makeLinkGeometry(from, to) {
   const x1 = from.x + NODE_SIZE / 2
   const y1 = from.y + NODE_SIZE / 2
   const x2 = to.x + NODE_SIZE / 2
   const y2 = to.y + NODE_SIZE / 2
-  const mx = (x1 + x2) / 2
-  const my = (y1 + y2) / 2
-  
+
   const dx = x2 - x1
-  const sign = dx >= 0 ? 1 : -1
-  const offset = Math.abs(y2 - y1) * 0.3 * sign
-  
-  return `M ${x1} ${y1} Q ${mx + offset} ${my}, ${x2} ${y2}`
+  const dy = y2 - y1
+  const length = Math.hypot(dx, dy) || 1
+  // 两端各留出半个节点宽度，让线段从圆盘边缘开始/结束
+  const trim = Math.max(0, NODE_SIZE / 2 - 2)
+  const ux = dx / length
+  const uy = dy / length
+  const startX = x1 + ux * trim
+  const startY = y1 + uy * trim
+  const lineLength = Math.max(0, length - trim * 2)
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI
+
+  return {
+    left: `${startX}px`,
+    top: `${startY - 1.5}px`,
+    width: `${lineLength}px`,
+    transform: `rotate(${angle}deg)`
+  }
 }
 
 // ==================== 节点状态判断 ====================
@@ -1070,24 +1077,38 @@ page { height: 100%; background: #f5ecd9; }
 }
 .canvas-inner { position: relative; }
 
-/* ========== SVG 连线 ========== */
+/* ========== 连线（view + rotate） ========== */
 .links-layer {
   position: absolute; top: 0; left: 0;
   width: 100%; height: 100%;
   pointer-events: none; z-index: 1;
 }
-.link-path {
-  fill: none; stroke: #d8c8a8; stroke-width: 2;
-  stroke-linecap: round;
+.link-line {
+  position: absolute;
+  height: 3px;
+  border-radius: 2px;
+  background: #d8c8a8;
+  transform-origin: 0 50%;
   opacity: 0;
-  animation: drawLine 0.6s ease forwards;
+  animation: showLine 0.45s ease forwards;
 }
-@keyframes drawLine {
-  from { stroke-dasharray: 0 1000; opacity: 0; }
-  to { stroke-dasharray: 1000 0; opacity: 1; }
+.link-line.link-done { background: #b8a37c; }
+.link-line.link-active { height: 4px; background: #c97b4a; }
+.link-arrow {
+  position: absolute; right: -2px; top: 50%;
+  width: 0; height: 0;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid #b8a37c;
 }
-.link-path.link-done { stroke: #b8a37c; stroke-width: 2.5; }
-.link-path.link-active { stroke: #c97b4a; stroke-width: 3; }
+.link-line.link-active .link-arrow {
+  border-left-color: #c97b4a;
+}
+@keyframes showLine {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* ========== 节点 ========== */
 .map-node {

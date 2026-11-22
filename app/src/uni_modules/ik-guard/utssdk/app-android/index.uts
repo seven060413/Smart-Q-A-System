@@ -44,7 +44,7 @@ const ACTION_UPDATE = 'ik_guard_update'
 const ACTION_STOP = 'ik_guard_stop'
 
 const CHANNEL_GUARD = 'sd_guard'
-const NOTIF_ID = 71001
+const NOTIF_ID: Int = 71001
 
 // ---------- 运行态 ----------
 
@@ -65,8 +65,8 @@ let snoozeTimer = 0
 
 const TITLES = ['我正在看哦', '看见你了', '别走太远']
 
-function dp(ctx: Context, value: number): number {
-  return Math.round(value * ctx.getResources().getDisplayMetrics().density)
+function dp(ctx: Context, value: number): Int {
+  return Math.round(value * ctx.getResources().getDisplayMetrics().density).toInt()
 }
 
 function saveState(ctx: Context) {
@@ -75,7 +75,7 @@ function saveState(ctx: Context) {
     prefs.edit()
       .putBoolean(KEY_ACTIVE, activeGuard)
       .putString(KEY_FOCUS_ID, guardFocusId)
-      .putLong(KEY_END_AT, guardEndAt)
+      .putLong(KEY_END_AT, guardEndAt.toLong())
       .putString(KEY_TASK, guardTask)
       .putString(KEY_STATE, guardState)
       .putBoolean(KEY_BACKGROUND, appInBackground)
@@ -88,7 +88,7 @@ function loadState(ctx: Context) {
     const prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     activeGuard = prefs.getBoolean(KEY_ACTIVE, false)
     guardFocusId = prefs.getString(KEY_FOCUS_ID, '') ?? ''
-    guardEndAt = prefs.getLong(KEY_END_AT, 0)
+    guardEndAt = prefs.getLong(KEY_END_AT, 0).toDouble()
     guardTask = prefs.getString(KEY_TASK, '') ?? ''
     guardState = prefs.getString(KEY_STATE, 'focus') ?? 'focus'
     appInBackground = prefs.getBoolean(KEY_BACKGROUND, false)
@@ -169,11 +169,10 @@ function launchIntent(ctx: Context): PendingIntent | null {
 
 function buildGuardNotification(ctx: Context): Notification {
   ensureGuardChannel(ctx)
-  let builder: Notification.Builder
+  let builder = new Notification.Builder(ctx)
   if (Build.VERSION.SDK_INT >= 26) {
     builder = new Notification.Builder(ctx, CHANNEL_GUARD)
   } else {
-    builder = new Notification.Builder(ctx)
     builder.setPriority(Notification.PRIORITY_LOW)
   }
   let icon = ctx.getApplicationInfo().icon
@@ -209,7 +208,7 @@ function openApp(ctx: Context) {
 
 export class EyeView extends View {
   state: string = 'focus'
-  private paint: Paint = new Paint(Paint.ANTI_ALIAS_FLAG)
+  private paint: Paint = new Paint(Paint.ANTI_ALIAS_FLAG.toInt())
   private tick: number = 0
   private blink: number = 0
   private live: boolean = true
@@ -225,17 +224,15 @@ export class EyeView extends View {
   }
 
   private startTicker() {
-    const self = this
-    const loop = () => {
-      if (!self.live) return
-      self.tick = self.tick + 1
-      self.invalidate()
-      setTimeout(() => {
-        loop()
-      }, 650)
-    }
+    this.tickOnce()
+  }
+
+  private tickOnce() {
+    if (!this.live) return
+    this.tick = this.tick + 1
+    this.invalidate()
     setTimeout(() => {
-      loop()
+      this.tickOnce()
     }, 650)
   }
 
@@ -277,7 +274,7 @@ export class EyeView extends View {
 
     const gap = dp(ctx, 6)
     // 自适应：卡片态尽量放大，气泡态自动缩小避免裁切。
-    let eyeW = dp(ctx, 52)
+    let eyeW: number = dp(ctx, 76)
     const maxEyeW = Math.max(dp(ctx, 10), (w - gap - dp(ctx, 8)) / 2)
     if (eyeW > maxEyeW) eyeW = maxEyeW
     const eyeH = eyeW * (22.0 / 32.0) * factor
@@ -295,10 +292,15 @@ export class EyeView extends View {
       // 到点脉冲环
       const pulsePhase = (this.tick % 3) / 3.0
       this.paint.setStyle(Paint.Style.STROKE)
-      this.paint.setStrokeWidth(dp(ctx, 1.5))
+      this.paint.setStrokeWidth(dp(ctx, 1.5).toFloat())
       this.paint.setColor(Color.parseColor('#5B9BD5'))
       this.paint.setAlpha(120)
-      canvas.drawCircle(w / 2.0, h / 2.0, dp(ctx, 24) + dp(ctx, 18) * pulsePhase, this.paint)
+      canvas.drawCircle(
+        (w / 2.0).toFloat(),
+        (h / 2.0).toFloat(),
+        (dp(ctx, 24) + dp(ctx, 18) * pulsePhase).toFloat(),
+        this.paint
+      )
       this.paint.setAlpha(255)
       this.paint.setStyle(Paint.Style.FILL)
     }
@@ -319,7 +321,12 @@ export class EyeView extends View {
     blink: number
   ) {
     const paint = this.paint
-    const rect = new RectF(left, top, left + width, top + height)
+    const rect = new RectF(
+      left.toFloat(),
+      top.toFloat(),
+      (left + width).toFloat(),
+      (top + height).toFloat()
+    )
 
     paint.setStyle(Paint.Style.FILL)
     paint.setColor(Color.parseColor('#F4F1EA'))
@@ -327,19 +334,35 @@ export class EyeView extends View {
 
     const cx = left + width / 2 + gazeX
     const cy = top + height / 2 + gazeY
+    // 瞳孔与高光按眼睛宽度等比缩放，避免眼睛放大后眼珠仍是一小点。
+    const irisR = width * 0.17
+    const pupilR = width * 0.085
+    const glintR = width * 0.03
+    const glintOffset = width * 0.04
 
     paint.setColor(Color.parseColor('#5B9BD5'))
-    canvas.drawCircle(cx, cy, dp(ctx, 6.5), paint)
+    canvas.drawCircle(cx.toFloat(), cy.toFloat(), irisR.toFloat(), paint)
 
     paint.setColor(Color.parseColor('#14161A'))
-    canvas.drawCircle(cx, cy, dp(ctx, 3), paint)
+    canvas.drawCircle(cx.toFloat(), cy.toFloat(), pupilR.toFloat(), paint)
 
     paint.setColor(Color.parseColor('#FFFFFF'))
-    canvas.drawCircle(cx - dp(ctx, 2), cy - dp(ctx, 2), dp(ctx, 1.25), paint)
+    canvas.drawCircle(
+      (cx - glintOffset).toFloat(),
+      (cy - glintOffset).toFloat(),
+      glintR.toFloat(),
+      paint
+    )
 
     if (blink > 0) {
       paint.setColor(Color.parseColor('#1F2937'))
-      canvas.drawRect(left, top, left + width, top + height * blink, paint)
+      canvas.drawRect(
+        left.toFloat(),
+        top.toFloat(),
+        (left + width).toFloat(),
+        (top + height * blink).toFloat(),
+        paint
+      )
     }
   }
 }
@@ -349,14 +372,14 @@ export class EyeView extends View {
 function roundedBg(color: string, radius: number): GradientDrawable {
   const drawable = new GradientDrawable()
   drawable.setColor(Color.parseColor(color))
-  drawable.setCornerRadius(radius)
+  drawable.setCornerRadius(radius.toFloat())
   return drawable
 }
 
 function makeText(ctx: Context, text: string, size: number, color: string, bold: boolean): TextView {
   const view = new TextView(ctx)
   view.setText(text)
-  view.setTextSize(size)
+  view.setTextSize(size.toFloat())
   view.setTextColor(Color.parseColor(color))
   if (bold) view.setTypeface(null, Typeface.BOLD)
   return view
@@ -365,9 +388,9 @@ function makeText(ctx: Context, text: string, size: number, color: string, bold:
 function makeAction(ctx: Context, text: string, bgColor: string, textColor: string): TextView {
   const view = new TextView(ctx)
   view.setText(text)
-  view.setTextSize(13)
+  view.setTextSize(13.0.toFloat())
   view.setTextColor(Color.parseColor(textColor))
-  view.setGravity(Gravity.CENTER)
+  view.setGravity(Gravity.CENTER.toInt())
   view.setPadding(dp(ctx, 10), dp(ctx, 6), dp(ctx, 10), dp(ctx, 6))
   view.setBackground(roundedBg(bgColor, dp(ctx, 16)))
   view.setClickable(true)
@@ -384,9 +407,12 @@ function removeOverlay() {
     } catch (e) {}
   }
   if (overlayCard != null) {
-    const eye = overlayCard.getChildAt(0)
-    if (eye != null && eye instanceof EyeView) {
-      (eye as EyeView).release()
+    const card = overlayCard
+    if (card != null) {
+      const eye = card.getChildAt(0)
+      if (eye != null && eye instanceof EyeView) {
+        (eye as EyeView).release()
+      }
     }
   }
   overlayCard = null
@@ -413,6 +439,7 @@ function showOverlay(expanded: boolean) {
   const state = effectiveState()
   const root = new LinearLayout(ctx)
   root.setOrientation(LinearLayout.VERTICAL)
+  root.setGravity(Gravity.CENTER_HORIZONTAL.toInt())
   root.setBackground(roundedBg('#1F2937', dp(ctx, 16)))
 
   const eye = new EyeView(ctx)
@@ -420,25 +447,22 @@ function showOverlay(expanded: boolean) {
   if (expanded) {
     root.setPadding(dp(ctx, 18), dp(ctx, 14), dp(ctx, 18), dp(ctx, 14))
     const eyeLp = new LinearLayout.LayoutParams(dp(ctx, 176), dp(ctx, 104))
-    eyeLp.gravity = Gravity.CENTER_HORIZONTAL
     root.addView(eye, eyeLp)
 
-    const titleIndex = Math.abs(Math.floor(Date.now() / 1000)) % TITLES.length
-    const title = makeText(ctx, TITLES[titleIndex], 18, '#FFFFFF', true)
+    const titleIndex = (Math.abs(Math.floor(Date.now() / 1000)) % TITLES.length).toInt()
+    const title = makeText(ctx, TITLES[titleIndex] ?? '', 18, '#FFFFFF', true)
     const titleLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     titleLp.topMargin = dp(ctx, 6)
-    titleLp.gravity = Gravity.CENTER_HORIZONTAL
     root.addView(title, titleLp)
 
     const sub = makeText(ctx, subtitleFor(state), 12, '#D1D5DB', false)
     const subLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     subLp.topMargin = dp(ctx, 4)
-    subLp.gravity = Gravity.CENTER_HORIZONTAL
     root.addView(sub, subLp)
 
     const row = new LinearLayout(ctx)
     row.setOrientation(LinearLayout.HORIZONTAL)
-    row.setGravity(Gravity.CENTER_HORIZONTAL)
+    row.setGravity(Gravity.CENTER_HORIZONTAL.toInt())
 
     const back = makeAction(ctx, '回到专注', '#5B9BD5', '#FFFFFF')
     back.setOnClickListener((v: View) => {
@@ -470,17 +494,17 @@ function showOverlay(expanded: boolean) {
   }
 
   const wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-  let type = WindowManager.LayoutParams.TYPE_PHONE
+  let type: Int = WindowManager.LayoutParams.TYPE_PHONE
   if (Build.VERSION.SDK_INT >= 26) type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-  const flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+  const flags: Int = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
   const layoutParams = new WindowManager.LayoutParams(
-    WindowManager.LayoutParams.WRAP_CONTENT,
-    WindowManager.LayoutParams.WRAP_CONTENT,
+    WindowManager.LayoutParams.WRAP_CONTENT.toInt(),
+    WindowManager.LayoutParams.WRAP_CONTENT.toInt(),
     type,
     flags,
-    PixelFormat.TRANSLUCENT
+    PixelFormat.TRANSLUCENT.toInt()
   )
-  layoutParams.gravity = Gravity.TOP | Gravity.END
+  layoutParams.gravity = (Gravity.TOP | Gravity.END).toInt()
   layoutParams.x = dp(ctx, 12)
   layoutParams.y = dp(ctx, 48)
 
@@ -573,11 +597,17 @@ export function openOverlaySettings(): void {
   }
 }
 
+function guardServiceIntent(ctx: Context): Intent {
+  const intent = new Intent()
+  intent.setClassName(ctx, 'uts.sdk.modules.ikGuard.FocusGuardService')
+  return intent
+}
+
 function sendService(action: string) {
   const ctx = UTSAndroid.getAppContext()
   if (ctx == null) return
   try {
-    const intent = new Intent(ctx, FocusGuardService::class.java)
+    const intent = guardServiceIntent(ctx)
     intent.setAction(action)
     ctx.startService(intent)
   } catch (e) {
@@ -599,7 +629,7 @@ export function startGuard(focusId: string, endAt: number, task: string, title: 
 
   let service = false
   try {
-    const intent = new Intent(ctx, FocusGuardService::class.java)
+    const intent = guardServiceIntent(ctx)
     intent.setAction(ACTION_START)
     if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent)
     else ctx.startService(intent)
@@ -626,7 +656,7 @@ export function stopGuard(): void {
     clearState(ctx)
     sendService(ACTION_STOP)
     try {
-      ctx.stopService(new Intent(ctx, FocusGuardService::class.java))
+      ctx.stopService(guardServiceIntent(ctx))
     } catch (e) {}
   }
 }
@@ -668,6 +698,10 @@ export function takePendingAction(): UTSJSONObject | null {
 // ---------- 前台服务 ----------
 
 export class FocusGuardService extends Service {
+  constructor() {
+    super()
+  }
+
   private startedForeground: boolean = false
   private showToken: number = 0
   private notifToken: number = 0
@@ -734,17 +768,15 @@ export class FocusGuardService extends Service {
 
   private startNotificationTicker(ctx: Context) {
     this.notifToken = this.notifToken + 1
-    const token = this.notifToken
-    const loop = () => {
-      if (token != this.notifToken) return
-      if (!activeGuard) return
-      updateNotification(ctx)
-      setTimeout(() => {
-        loop()
-      }, 60000)
-    }
+    this.notifyTick(ctx, this.notifToken)
+  }
+
+  private notifyTick(ctx: Context, token: number) {
+    if (token != this.notifToken) return
+    if (!activeGuard) return
+    updateNotification(ctx)
     setTimeout(() => {
-      loop()
+      this.notifyTick(ctx, token)
     }, 60000)
   }
 
